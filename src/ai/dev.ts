@@ -1,1 +1,2 @@
-// Flows will be imported for their side effects in this file.
+import '@/ai/flows/ai-powered-task-prioritization.ts';
+import '@/ai/flows/smart-task-creation.ts';
