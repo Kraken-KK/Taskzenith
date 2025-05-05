@@ -1,3 +1,6 @@
+'use client';
+
+import React, { useState } from 'react'; // Import useState
 import {
   Sidebar,
   SidebarContent,
@@ -8,21 +11,33 @@ import {
   SidebarInset,
   SidebarTrigger,
   SidebarFooter,
-  SidebarGroup,
-  SidebarGroupLabel,
 } from "@/components/ui/sidebar";
 import { KanbanBoard } from "@/components/kanban-board";
+import { AiChat } from "@/components/ai-chat"; // Import AiChat
 import { Button } from "@/components/ui/button";
 import { Bot, CheckSquare, ListTodo, Settings, Star } from "lucide-react";
-import Image from "next/image";
+
+type ActiveView = 'board' | 'ai-assistant' | 'prioritize' | 'smart-create' | 'settings';
 
 export default function Home() {
+  const [activeView, setActiveView] = useState<ActiveView>('board'); // State for active view
+
+  const getHeaderText = () => {
+    switch (activeView) {
+      case 'board': return 'Kanban Board';
+      case 'ai-assistant': return 'AI Assistant';
+      case 'prioritize': return 'Prioritize Tasks';
+      case 'smart-create': return 'Smart Task Creation';
+      case 'settings': return 'Settings';
+      default: return 'TaskZenith';
+    }
+  };
+
   return (
     <div className="flex h-screen">
       <Sidebar side="left" variant="inset" collapsible="icon">
         <SidebarHeader className="p-4">
           <div className="flex items-center gap-2">
-             {/* Replace with a proper logo later if available */}
             <svg
               xmlns="http://www.w3.org/2000/svg"
               viewBox="0 0 24 24"
@@ -43,25 +58,41 @@ export default function Home() {
         <SidebarContent className="flex-1 overflow-y-auto p-2">
           <SidebarMenu>
              <SidebarMenuItem>
-               <SidebarMenuButton tooltip="Board">
+               <SidebarMenuButton
+                  tooltip="Board"
+                  isActive={activeView === 'board'}
+                  onClick={() => setActiveView('board')}
+               >
                   <ListTodo />
                   Board
                 </SidebarMenuButton>
              </SidebarMenuItem>
              <SidebarMenuItem>
-               <SidebarMenuButton tooltip="AI Assistant">
+               <SidebarMenuButton
+                  tooltip="AI Assistant"
+                  isActive={activeView === 'ai-assistant'}
+                  onClick={() => setActiveView('ai-assistant')}
+                >
                   <Bot />
                   AI Assistant
                 </SidebarMenuButton>
              </SidebarMenuItem>
              <SidebarMenuItem>
-               <SidebarMenuButton tooltip="Prioritize Tasks">
+               <SidebarMenuButton
+                  tooltip="Prioritize Tasks"
+                  isActive={activeView === 'prioritize'}
+                  onClick={() => setActiveView('prioritize')}
+                >
                   <Star />
                   Prioritize Tasks
                 </SidebarMenuButton>
              </SidebarMenuItem>
              <SidebarMenuItem>
-               <SidebarMenuButton tooltip="Smart Task Creation">
+               <SidebarMenuButton
+                  tooltip="Smart Task Creation"
+                  isActive={activeView === 'smart-create'}
+                  onClick={() => setActiveView('smart-create')}
+                >
                   <CheckSquare />
                   Smart Task Creation
                 </SidebarMenuButton>
@@ -71,7 +102,11 @@ export default function Home() {
         <SidebarFooter className="p-2 border-t border-sidebar-border">
            <SidebarMenu>
              <SidebarMenuItem>
-               <SidebarMenuButton tooltip="Settings">
+               <SidebarMenuButton
+                  tooltip="Settings"
+                  isActive={activeView === 'settings'}
+                  onClick={() => setActiveView('settings')}
+                >
                   <Settings />
                   Settings
                 </SidebarMenuButton>
@@ -82,11 +117,18 @@ export default function Home() {
       <SidebarInset className="flex flex-col">
         <header className="flex items-center justify-between p-4 border-b">
            <SidebarTrigger />
-           <h1 className="text-xl font-semibold">Kanban Board</h1>
-           <Button size="sm">Add Task</Button>
+           <h1 className="text-xl font-semibold">{getHeaderText()}</h1>
+           {/* Add Task button removed from here */}
+           <div>{/* Placeholder for potential future header actions */}</div>
          </header>
         <main className="flex-1 overflow-y-auto p-4">
-          <KanbanBoard />
+          {/* Conditionally render components based on activeView */}
+          {activeView === 'board' && <KanbanBoard />}
+          {activeView === 'ai-assistant' && <AiChat />}
+          {/* Add placeholders or components for other views */}
+          {activeView === 'prioritize' && <div>Prioritize Tasks View (Coming Soon)</div>}
+          {activeView === 'smart-create' && <div>Smart Task Creation View (Coming Soon)</div>}
+          {activeView === 'settings' && <div>Settings View (Coming Soon)</div>}
         </main>
       </SidebarInset>
     </div>
