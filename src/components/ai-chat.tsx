@@ -5,11 +5,12 @@ import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/componen
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Send, Bot, User } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
-// TODO: Import the actual Genkit flow function when available
-// import { chatWithAI } from '@/ai/flows/chat-flow';
+import { chatWithAI, type ChatInput, type ChatOutput } from '@/ai/flows/chat-flow'; // Import the actual Genkit flow
+import { cn } from '@/lib/utils';
+
 
 interface Message {
   id: string;
@@ -57,28 +58,25 @@ export function AiChat() {
     setIsLoading(true);
 
     try {
-      // --- Placeholder AI Response ---
-      // TODO: Replace with actual Genkit flow call
-      // const aiResponseText = await chatWithAI({ query: trimmedInput }); // Example call
-      await new Promise(resolve => setTimeout(resolve, 1500)); // Simulate network delay
-      const aiResponseText = `This is a placeholder response to: "${trimmedInput}". The real AI integration is coming soon!`;
-      // --- End Placeholder ---
+      const aiInput: ChatInput = { query: trimmedInput };
+      const aiResponse: ChatOutput = await chatWithAI(aiInput);
 
       const aiMessage: Message = {
         id: `msg-${Date.now()}-ai`,
         sender: 'ai',
-        text: aiResponseText,
+        text: aiResponse.response,
         timestamp: Date.now(),
       };
       setMessages((prev) => [...prev, aiMessage]);
     } catch (error) {
       console.error('Error fetching AI response:', error);
+      const errorMessageText = error instanceof Error ? error.message : 'An unknown error occurred.';
       const errorMessage: Message = {
         id: `msg-${Date.now()}-error`,
         sender: 'ai',
         text: (
             <span className="text-destructive">
-                Sorry, I encountered an error. Please try again later.
+                Sorry, I encountered an error: {errorMessageText}
             </span>
         ),
         timestamp: Date.now(),
@@ -110,29 +108,25 @@ export function AiChat() {
               >
                 {message.sender === 'ai' && (
                   <Avatar className="h-8 w-8 border">
-                    {/* Placeholder image for AI */}
                      <AvatarFallback><Bot className="h-4 w-4" /></AvatarFallback>
                   </Avatar>
                 )}
                 <div
                   className={cn(
-                    'max-w-[75%] rounded-lg p-3 text-sm',
+                    'max-w-[75%] rounded-lg p-3 text-sm shadow', // Added shadow for better visibility
                     message.sender === 'user'
                       ? 'bg-primary text-primary-foreground'
-                      : 'bg-muted'
+                      : 'bg-muted text-muted-foreground' // Changed to muted for AI
                   )}
                 >
                   {typeof message.text === 'string' ? (
-                    // Render simple text, handling newlines
                      <p className="whitespace-pre-wrap">{message.text}</p>
                   ) : (
-                    // Render ReactNode directly (e.g., for error messages)
                     message.text
                   )}
                 </div>
                  {message.sender === 'user' && (
                   <Avatar className="h-8 w-8 border">
-                     {/* Placeholder/User image */}
                      <AvatarFallback><User className="h-4 w-4" /></AvatarFallback>
                   </Avatar>
                 )}
@@ -143,7 +137,7 @@ export function AiChat() {
                 <Avatar className="h-8 w-8 border">
                     <AvatarFallback><Bot className="h-4 w-4 animate-pulse" /></AvatarFallback>
                 </Avatar>
-                <div className="bg-muted rounded-lg p-3">
+                <div className="bg-muted rounded-lg p-3 shadow">
                     <Skeleton className="h-4 w-24" />
                 </div>
               </div>
@@ -170,9 +164,4 @@ export function AiChat() {
       </CardFooter>
     </Card>
   );
-}
-
-// Helper function for class names (ensure you have this utility)
-function cn(...classes: (string | undefined | null | false)[]): string {
-  return classes.filter(Boolean).join(' ');
 }

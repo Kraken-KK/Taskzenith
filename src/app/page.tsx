@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react'; // Import useState
+import React, { useState } from 'react';
 import {
   Sidebar,
   SidebarContent,
@@ -13,14 +13,19 @@ import {
   SidebarFooter,
 } from "@/components/ui/sidebar";
 import { KanbanBoard } from "@/components/kanban-board";
-import { AiChat } from "@/components/ai-chat"; // Import AiChat
-import { Button } from "@/components/ui/button";
-import { Bot, CheckSquare, ListTodo, Settings, Star } from "lucide-react";
+import { AiChat } from "@/components/ai-chat";
+import { SettingsView } from '@/components/settings-view'; // Import SettingsView
+import { PrioritizeTasksView } from '@/components/prioritize-tasks-view'; // Import PrioritizeTasksView
+import { SmartTaskCreationView } from '@/components/smart-task-creation-view'; // Import SmartTaskCreationView
+import { Bot, CheckSquare, ListTodo, Settings, Star, Menu } from "lucide-react"; // Added Menu for SidebarTrigger in mobile
+import { useSidebar } from '@/components/ui/sidebar'; // To control sidebar visibility
+import { Button } from '@/components/ui/button'; // For a dedicated mobile trigger if needed
 
 type ActiveView = 'board' | 'ai-assistant' | 'prioritize' | 'smart-create' | 'settings';
 
 export default function Home() {
-  const [activeView, setActiveView] = useState<ActiveView>('board'); // State for active view
+  const [activeView, setActiveView] = useState<ActiveView>('board');
+  const { isMobile } = useSidebar(); // Get mobile state
 
   const getHeaderText = () => {
     switch (activeView) {
@@ -34,7 +39,7 @@ export default function Home() {
   };
 
   return (
-    <div className="flex h-screen">
+    <div className="flex h-screen bg-background text-foreground">
       <Sidebar side="left" variant="inset" collapsible="icon">
         <SidebarHeader className="p-4">
           <div className="flex items-center gap-2">
@@ -116,19 +121,18 @@ export default function Home() {
       </Sidebar>
       <SidebarInset className="flex flex-col">
         <header className="flex items-center justify-between p-4 border-b">
+           {/* Use SidebarTrigger for both desktop and mobile by default. */}
+           {/* It will correctly handle mobile (Sheet trigger) and desktop (panel toggle) */}
            <SidebarTrigger />
            <h1 className="text-xl font-semibold">{getHeaderText()}</h1>
-           {/* Add Task button removed from here */}
            <div>{/* Placeholder for potential future header actions */}</div>
          </header>
-        <main className="flex-1 overflow-y-auto p-4">
-          {/* Conditionally render components based on activeView */}
+        <main className="flex-1 overflow-y-auto p-4 bg-secondary/20 dark:bg-neutral-900">
           {activeView === 'board' && <KanbanBoard />}
           {activeView === 'ai-assistant' && <AiChat />}
-          {/* Add placeholders or components for other views */}
-          {activeView === 'prioritize' && <div>Prioritize Tasks View (Coming Soon)</div>}
-          {activeView === 'smart-create' && <div>Smart Task Creation View (Coming Soon)</div>}
-          {activeView === 'settings' && <div>Settings View (Coming Soon)</div>}
+          {activeView === 'prioritize' && <PrioritizeTasksView />}
+          {activeView === 'smart-create' && <SmartTaskCreationView />}
+          {activeView === 'settings' && <SettingsView />}
         </main>
       </SidebarInset>
     </div>

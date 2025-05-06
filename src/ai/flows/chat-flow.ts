@@ -3,19 +3,19 @@
  * @fileOverview A basic chat flow for the AI Assistant.
  *
  * - chatWithAI - A function that takes a user query and returns an AI response.
- * - ChatInputSchema - The input type for the chatWithAI function.
- * - ChatOutputSchema - The return type for the chatWithAI function.
+ * - ChatInput - The input type for the chatWithAI function.
+ * - ChatOutput - The return type for the chatWithAI function.
  */
 
 import {ai} from '@/ai/ai-instance';
 import {z} from 'genkit';
 
-export const ChatInputSchema = z.object({
+const ChatInputSchema = z.object({
   query: z.string().describe('The user\'s message or question to the AI assistant.'),
 });
 export type ChatInput = z.infer<typeof ChatInputSchema>;
 
-export const ChatOutputSchema = z.object({
+const ChatOutputSchema = z.object({
   response: z.string().describe('The AI assistant\'s response to the user query.'),
 });
 export type ChatOutput = z.infer<typeof ChatOutputSchema>;
