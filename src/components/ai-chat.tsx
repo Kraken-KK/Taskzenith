@@ -1,3 +1,4 @@
+
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
@@ -8,11 +9,11 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Send, Bot, User } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
-import { chatWithAI, type ChatInput, type ChatOutput } from '@/ai/flows/chat-flow'; // Import the actual Genkit flow
+import { chatWithAI, type ChatInput, type ChatOutput, type MessageHistoryItem } from '@/ai/flows/chat-flow';
 import { cn } from '@/lib/utils';
 
 
-interface Message {
+interface DisplayMessage {
   id: string;
   sender: 'user' | 'ai';
   text: string | React.ReactNode; // Allow ReactNode for potential rich content
@@ -20,7 +21,7 @@ interface Message {
 }
 
 export function AiChat() {
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
@@ -46,20 +47,21 @@ export function AiChat() {
     const trimmedInput = inputValue.trim();
     if (!trimmedInput || isLoading) return;
 
-    const userMessage: Message = {
+    const userMessage: DisplayMessage = {
       id: `msg-${Date.now()}-user`,
       sender: 'user',
       text: trimmedInput,
       timestamp: Date.now(),
     };
 
-    setMessages((prev) => [...prev, userMessage]);
+    const updatedMessages = [...messages, userMessage];
+    setMessages(updatedMessages);
     setInputValue('');
     setIsLoading(true);
 
     // Add a placeholder AI message for a more immediate feel
     const thinkingMessageId = `msg-${Date.now()}-ai-thinking`;
-    const thinkingMessage: Message = {
+    const thinkingMessage: DisplayMessage = {
         id: thinkingMessageId,
         sender: 'ai',
         text: (
@@ -74,11 +76,27 @@ export function AiChat() {
     setMessages((prev) => [...prev, thinkingMessage]);
 
 
+    // Prepare history for AI flow
+    const historyForAI: MessageHistoryItem[] = updatedMessages
+      .filter(msg => msg.id !== thinkingMessageId) // Exclude the current "thinking" message
+      .map(msg => ({
+        role: msg.sender === 'user' ? 'user' : 'model',
+        parts: [{ text: typeof msg.text === 'string' ? msg.text : 'System message or UI element.' }] // Handle ReactNode gracefully
+      }));
+    
+    // Remove the last item from historyForAI if it's the user's current query, 
+    // as it's passed separately in `query`
+    if (historyForAI.length > 0 && historyForAI[historyForAI.length -1].role === 'user') {
+        // This logic assumes the last message IS the current user query.
+        // The query field in ChatInput is for the current user message.
+    }
+
+
     try {
-      const aiInput: ChatInput = { query: trimmedInput };
+      const aiInput: ChatInput = { query: trimmedInput, history: historyForAI.slice(0, -1) }; // Send history *before* current query
       const aiResponse: ChatOutput = await chatWithAI(aiInput);
 
-      const aiMessage: Message = {
+      const aiMessage: DisplayMessage = {
         id: `msg-${Date.now()}-ai`, // New ID for the actual response
         sender: 'ai',
         text: aiResponse.response,
@@ -89,12 +107,12 @@ export function AiChat() {
     } catch (error) {
       console.error('Error fetching AI response:', error);
       const errorMessageText = error instanceof Error ? error.message : 'An unknown error occurred.';
-      const errorMessage: Message = {
+      const errorMessage: DisplayMessage = {
         id: `msg-${Date.now()}-error`, // New ID for the error
         sender: 'ai',
         text: (
             <span className="text-destructive">
-                Sorry, I encountered an error: {errorMessageText}
+                Sorry, Jack encountered an issue: {errorMessageText}
             </span>
         ),
         timestamp: Date.now(),
@@ -151,19 +169,7 @@ export function AiChat() {
                 )}
               </div>
             ))}
-            {isLoading && messages.length > 0 && messages[messages.length-1].text && typeof messages[messages.length-1].text !== 'string' && (
-              // This ensures the loading skeleton for "thinking" is removed once a real message (even an error) replaces it.
-              // The actual thinking message is handled by the specific logic in handleSendMessage.
-              // This is a fallback / visual cue if the last message IS the loading dots.
-              <div className="flex items-start gap-3 justify-start animate-fadeIn">
-                <Avatar className="h-9 w-9 border-2 border-primary/50 shadow-md">
-                    <AvatarFallback className="bg-primary/10 "><Bot className="h-5 w-5 animate-pulse text-primary" /></AvatarFallback>
-                </Avatar>
-                <div className="bg-muted dark:bg-neutral-700 rounded-2xl p-3.5 shadow-lg">
-                    <Skeleton className="h-4 w-24 bg-muted-foreground/20 dark:bg-neutral-600" />
-                </div>
-              </div>
-            )}
+            {/* Removed the explicit loading skeleton here as the "thinkingMessage" handles this state */}
           </div>
         </ScrollArea>
       </CardContent>
@@ -187,4 +193,3 @@ export function AiChat() {
     </Card>
   );
 }
-
