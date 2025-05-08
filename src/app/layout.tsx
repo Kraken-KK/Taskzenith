@@ -37,8 +37,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning> {/* Add suppressHydrationWarning */}
-      <body className={`${inter.variable} ${geistSans.variable} ${geistMono.variable} antialiased`}> {/* Add Inter to font classes */}
+    <html lang="en" suppressHydrationWarning>
+      <body className={`${inter.variable} ${geistSans.variable} ${geistMono.variable} antialiased`}>
         <ThemeProvider
           defaultTheme="system"
           storageKey="taskzenith-theme"
