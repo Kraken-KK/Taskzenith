@@ -1,3 +1,4 @@
+
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -7,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Progress } from "@/components/ui/progress";
+import { Label } from "@/components/ui/label"; // Added import for Label
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Plus, Edit2, Trash2, Check, X, GripVertical, AlertTriangle, ListChecks, Sparkles } from 'lucide-react';
 import Confetti from 'react-confetti';
@@ -554,3 +556,4 @@ export function KanbanBoard() {
     </div>
   );
 }
+
