@@ -1,4 +1,3 @@
-
 'use client';
 
 import React, { useEffect } from 'react';
@@ -102,7 +101,8 @@ export function AddTaskDialog({ open, onOpenChange, onAddTask, children, initial
       description: data.description || undefined,
       priority: data.priority,
       deadline: data.deadline ? format(data.deadline, 'yyyy-MM-dd') : undefined,
-      tags: isBetaModeEnabled ? parsedTags : undefined, // Only include tags if beta mode is on
+      tags: isBetaModeEnabled ? parsedTags : undefined,
+      checklist: isBetaModeEnabled ? (initialTaskData?.checklist || []) : undefined, // Preserve or init checklist
     };
     onAddTask(taskData);
   }
@@ -240,4 +240,3 @@ export function AddTaskDialog({ open, onOpenChange, onAddTask, children, initial
     </Dialog>
   );
 }
-
