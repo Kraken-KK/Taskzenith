@@ -1,3 +1,4 @@
+
 'use client';
 
 import React, { useEffect } from 'react';
@@ -38,12 +39,14 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Calendar } from '@/components/ui/calendar';
 import { cn } from '@/lib/utils';
 import type { Task } from '@/types';
+import { useSettings } from '@/contexts/SettingsContext'; // Import useSettings
 
 const taskFormSchema = z.object({
   content: z.string().min(1, { message: 'Task content cannot be empty.' }).max(200, { message: 'Task content is too long.' }),
   description: z.string().max(500, { message: 'Description is too long.' }).optional().nullable(),
   priority: z.enum(['low', 'medium', 'high']).optional(),
   deadline: z.date().optional().nullable(),
+  tags: z.string().optional().nullable(), // Tags as comma-separated string
 });
 
 type TaskFormValues = z.infer<typeof taskFormSchema>;
@@ -57,6 +60,7 @@ interface AddTaskDialogProps {
 }
 
 export function AddTaskDialog({ open, onOpenChange, onAddTask, children, initialTaskData }: AddTaskDialogProps) {
+  const { isBetaModeEnabled } = useSettings();
   const form = useForm<TaskFormValues>({
     resolver: zodResolver(taskFormSchema),
     defaultValues: {
@@ -64,6 +68,7 @@ export function AddTaskDialog({ open, onOpenChange, onAddTask, children, initial
       description: '',
       priority: 'medium',
       deadline: undefined,
+      tags: '',
     },
   });
 
@@ -75,13 +80,15 @@ export function AddTaskDialog({ open, onOpenChange, onAddTask, children, initial
           description: initialTaskData.description || '',
           priority: initialTaskData.priority || 'medium',
           deadline: initialTaskData.deadline ? parseISO(initialTaskData.deadline) : undefined,
+          tags: initialTaskData.tags ? initialTaskData.tags.join(', ') : '',
         });
       } else {
-        form.reset({ // Reset to default for new task
+        form.reset({
             content: '',
             description: '',
             priority: 'medium',
             deadline: undefined,
+            tags: '',
         });
       }
     }
@@ -89,14 +96,15 @@ export function AddTaskDialog({ open, onOpenChange, onAddTask, children, initial
 
 
   function onSubmit(data: TaskFormValues) {
+    const parsedTags = data.tags ? data.tags.split(',').map(tag => tag.trim()).filter(tag => tag) : [];
     const taskData: Omit<Task, 'id' | 'status'> = {
       content: data.content,
       description: data.description || undefined,
       priority: data.priority,
       deadline: data.deadline ? format(data.deadline, 'yyyy-MM-dd') : undefined,
+      tags: isBetaModeEnabled ? parsedTags : undefined, // Only include tags if beta mode is on
     };
     onAddTask(taskData);
-    // onOpenChange(false); // Closing is handled by parent after onAddTask completes
   }
 
   return (
@@ -135,13 +143,28 @@ export function AddTaskDialog({ open, onOpenChange, onAddTask, children, initial
                       placeholder="Add more details about the task..."
                       className="resize-none transition-shadow duration-200 focus:shadow-md"
                       {...field}
-                      value={field.value ?? ''} // Handle null value
+                      value={field.value ?? ''}
                     />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
               )}
             />
+            {isBetaModeEnabled && (
+              <FormField
+                control={form.control}
+                name="tags"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Tags (Beta - comma separated)</FormLabel>
+                    <FormControl>
+                      <Input placeholder="e.g., urgent, marketing, dev" {...field} value={field.value ?? ''} className="transition-shadow duration-200 focus:shadow-md" />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            )}
             <div className="grid grid-cols-2 gap-4">
               <FormField
                 control={form.control}
@@ -217,3 +240,4 @@ export function AddTaskDialog({ open, onOpenChange, onAddTask, children, initial
     </Dialog>
   );
 }
+

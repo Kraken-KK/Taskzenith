@@ -1,3 +1,4 @@
+
 'use client';
 
 import type { Task, Column } from '@/types';
@@ -5,31 +6,42 @@ import type { ReactNode } from 'react';
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { useToast } from "@/hooks/use-toast";
 
+// Helper to generate unique IDs
+const generateId = (prefix: string = 'id') => `${prefix}-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+
 // Initial placeholder data
 const initialColumnsData: Column[] = [
   {
-    id: 'todo',
+    id: generateId('col'),
     title: 'To Do',
     tasks: [
-      { id: 'task-1', content: 'Design the user interface mockup', status: 'todo', priority: 'high', deadline: '2024-08-15', description: 'Create mockups for the main board and task details.' },
-      { id: 'task-2', content: 'Set up the project structure', status: 'todo', priority: 'medium', description: 'Initialize Next.js, install dependencies, configure Tailwind.' },
+      { id: generateId('task'), content: 'Design the user interface mockup', status: '', priority: 'high', deadline: '2024-08-15', description: 'Create mockups for the main board and task details.', tags: ['design', 'UI'] },
+      { id: generateId('task'), content: 'Set up the project structure', status: '', priority: 'medium', description: 'Initialize Next.js, install dependencies, configure Tailwind.', tags: ['dev', 'setup'] },
     ],
   },
   {
-    id: 'inProgress',
+    id: generateId('col'),
     title: 'In Progress',
     tasks: [
-      { id: 'task-3', content: 'Develop the Kanban board component', status: 'inProgress', priority: 'high', description: 'Build the main drag-and-drop interface.' },
+      { id: generateId('task'), content: 'Develop the Kanban board component', status: '', priority: 'high', description: 'Build the main drag-and-drop interface.', tags: ['dev', 'kanban'] },
     ],
   },
   {
-    id: 'done',
+    id: generateId('col'),
     title: 'Done',
     tasks: [
-      { id: 'task-4', content: 'Gather project requirements', status: 'done', description: 'Define features and user stories.' },
+      { id: generateId('task'), content: 'Gather project requirements', status: '', description: 'Define features and user stories.', tags: ['planning'] },
     ],
   },
 ];
+
+// Assign initial status to tasks based on their column
+initialColumnsData.forEach(col => {
+  col.tasks.forEach(task => {
+    task.status = col.id;
+  });
+});
+
 
 interface TaskContextType {
   columns: Column[];
@@ -40,6 +52,10 @@ interface TaskContextType {
   updateTask: (updatedTask: Task) => void;
   getTaskById: (taskId: string) => Task | undefined;
   getAllTasks: () => Task[];
+  addColumn: (title: string) => void;
+  updateColumnTitle: (columnId: string, newTitle: string) => void;
+  deleteColumn: (columnId: string) => void;
+  // updateColumnOrder: (columnOrder: string[]) => void; // For future drag-drop columns
 }
 
 const TaskContext = createContext<TaskContextType | undefined>(undefined);
@@ -50,10 +66,14 @@ export function TaskProvider({ children }: { children: ReactNode }) {
       const savedTasks = localStorage.getItem('kanbanTasks');
       if (savedTasks) {
         try {
-          return JSON.parse(savedTasks);
+          const parsed = JSON.parse(savedTasks);
+          // Basic validation to ensure it's an array and items have id and title
+          if (Array.isArray(parsed) && parsed.every(col => col.id && col.title && Array.isArray(col.tasks))) {
+            return parsed;
+          }
+          console.warn("Invalid data structure in localStorage for tasks, resetting to default.");
         } catch (e) {
           console.error("Failed to parse tasks from localStorage", e);
-          return initialColumnsData;
         }
       }
     }
@@ -67,31 +87,42 @@ export function TaskProvider({ children }: { children: ReactNode }) {
     }
   }, [columns]);
 
-  const addTask = (taskData: Omit<Task, 'id' | 'status'>, targetColumnId: Column['id'] = 'todo') => {
+  const addTask = (taskData: Omit<Task, 'id' | 'status'>, targetColumnId?: Column['id']) => {
+    const finalTargetColumnId = targetColumnId || (columns.length > 0 ? columns[0].id : undefined);
+
+    if (!finalTargetColumnId) {
+        toast({
+            title: "Error Adding Task",
+            description: "No columns available to add the task to. Please add a column first.",
+            variant: "destructive",
+        });
+        return;
+    }
+    
     const newTask: Task = {
       ...taskData,
-      id: `task-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
-      status: targetColumnId,
+      id: generateId('task'),
+      status: finalTargetColumnId, // Use the actual ID of the target column
+      tags: taskData.tags || [],
     };
 
     setColumns(prevColumns => {
       const newColumns = prevColumns.map(col => ({ ...col, tasks: [...col.tasks] }));
-      const targetColumn = newColumns.find(col => col.id === targetColumnId);
+      const targetColumn = newColumns.find(col => col.id === finalTargetColumnId);
       if (targetColumn) {
-        targetColumn.tasks.unshift(newTask); // Add to the beginning
+        targetColumn.tasks.unshift(newTask);
       } else {
-        // Fallback to 'todo' if targetColumnId is invalid
-        const todoColumn = newColumns.find(col => col.id === 'todo');
-        if (todoColumn) {
-          todoColumn.tasks.unshift({ ...newTask, status: 'todo' });
-        }
+         // This case should ideally not be hit if finalTargetColumnId is validated
+         console.error(`Target column with id ${finalTargetColumnId} not found.`);
+         return prevColumns; // or handle more gracefully
       }
       return newColumns;
     });
 
+    const targetColumnObj = columns.find(c => c.id === finalTargetColumnId);
     toast({
       title: "Task Added",
-      description: `"${newTask.content}" added to ${targetColumnId === 'todo' ? 'To Do' : targetColumnId === 'inProgress' ? 'In Progress' : 'Done'}.`,
+      description: `"${newTask.content}" added to ${targetColumnObj?.title || 'selected column'}.`,
     });
   };
 
@@ -100,7 +131,7 @@ export function TaskProvider({ children }: { children: ReactNode }) {
     setColumns(prevColumns => {
       const newColumns = prevColumns.map(col => ({
         ...col,
-        tasks: col.tasks.map(task => ({ ...task })), // Deep copy tasks
+        tasks: col.tasks.map(task => ({ ...task })),
       }));
 
       const sourceCol = newColumns.find(col => col.id === sourceColumnId);
@@ -173,9 +204,65 @@ export function TaskProvider({ children }: { children: ReactNode }) {
     return columns.reduce((acc, column) => acc.concat(column.tasks), [] as Task[]);
   };
 
+  // Column Management Functions
+  const addColumn = (title: string) => {
+    if (!title.trim()) {
+        toast({ title: "Error", description: "Column title cannot be empty.", variant: "destructive" });
+        return;
+    }
+    const newColumn: Column = {
+      id: generateId('col'),
+      title: title.trim(),
+      tasks: [],
+    };
+    setColumns(prevColumns => [...prevColumns, newColumn]);
+    toast({ title: "Column Added", description: `Column "${title}" created.` });
+  };
+
+  const updateColumnTitle = (columnId: string, newTitle: string) => {
+    if (!newTitle.trim()) {
+        toast({ title: "Error", description: "Column title cannot be empty.", variant: "destructive" });
+        return;
+    }
+    setColumns(prevColumns =>
+      prevColumns.map(col =>
+        col.id === columnId ? { ...col, title: newTitle.trim() } : col
+      )
+    );
+    toast({ title: "Column Updated", description: `Column renamed to "${newTitle}".` });
+  };
+
+  const deleteColumn = (columnId: string) => {
+    const columnToDelete = columns.find(col => col.id === columnId);
+    if (!columnToDelete) return;
+
+    if (columns.length <= 1) {
+        toast({ title: "Cannot Delete", description: "You must have at least one column.", variant: "destructive" });
+        return;
+    }
+
+    if (columnToDelete.tasks.length > 0) {
+      toast({ title: "Cannot Delete", description: `Column "${columnToDelete.title}" contains tasks. Please move or delete them first.`, variant: "destructive" });
+      return;
+    }
+    setColumns(prevColumns => prevColumns.filter(col => col.id !== columnId));
+    toast({ title: "Column Deleted", description: `Column "${columnToDelete.title}" removed.` });
+  };
 
   return (
-    <TaskContext.Provider value={{ columns, setColumns, addTask, moveTask, deleteTask, updateTask, getTaskById, getAllTasks }}>
+    <TaskContext.Provider value={{ 
+        columns, 
+        setColumns, 
+        addTask, 
+        moveTask, 
+        deleteTask, 
+        updateTask, 
+        getTaskById, 
+        getAllTasks,
+        addColumn,
+        updateColumnTitle,
+        deleteColumn,
+    }}>
       {children}
     </TaskContext.Provider>
   );
