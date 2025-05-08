@@ -1,5 +1,6 @@
 import type {Metadata} from 'next';
-import {Geist, Geist_Mono} from 'next/font/google';
+import { Geist, Geist_Mono } from 'next/font/google';
+import { Inter } from 'next/font/google'; // Import Inter
 import './globals.css';
 import { Toaster } from "@/components/ui/toaster";
 import { SidebarProvider } from "@/components/ui/sidebar";
@@ -16,6 +17,13 @@ const geistMono = Geist_Mono({
   subsets: ['latin'],
 });
 
+// Configure Inter font
+const inter = Inter({
+  variable: '--font-inter',
+  subsets: ['latin'],
+});
+
+
 export const metadata: Metadata = {
   title: 'TaskZenith',
   description: 'AI Powered Task Tracking App',
@@ -28,7 +36,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning> {/* Add suppressHydrationWarning */}
-      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
+      <body className={`${inter.variable} ${geistSans.variable} ${geistMono.variable} antialiased`}> {/* Add Inter to font classes */}
         <ThemeProvider
           defaultTheme="system"
           storageKey="taskzenith-theme"

@@ -12,25 +12,26 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Moon, Sun, Laptop } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 export function SettingsView() {
   const { theme, setTheme } = useTheme();
 
   return (
-    <Card className="max-w-2xl mx-auto">
+    <Card className="max-w-2xl mx-auto shadow-xl interactive-card-hover">
       <CardHeader>
         <CardTitle>Application Settings</CardTitle>
       </CardHeader>
       <CardContent className="space-y-6">
-        <div className="flex items-center justify-between p-4 border rounded-lg">
+        <div className="flex items-center justify-between p-4 border rounded-lg shadow-sm hover:shadow-md transition-shadow duration-200">
           <Label htmlFor="theme-select" className="text-lg font-medium">
             Theme
           </Label>
           <Select value={theme} onValueChange={(value) => setTheme(value as 'light' | 'dark' | 'system')}>
-            <SelectTrigger className="w-[180px]" id="theme-select">
+            <SelectTrigger className="w-[180px] transition-all duration-150 ease-in-out hover:border-primary focus:shadow-outline-primary">
               <SelectValue placeholder="Select theme" />
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent className="transition-opacity duration-150 ease-in-out">
               <SelectItem value="light">
                 <div className="flex items-center gap-2">
                   <Sun className="h-4 w-4" />
@@ -53,7 +54,7 @@ export function SettingsView() {
           </Select>
         </div>
         {/* Add more settings here as needed */}
-         <div className="p-4 border rounded-lg">
+         <div className="p-4 border rounded-lg shadow-sm hover:shadow-md transition-shadow duration-200">
             <h3 className="text-lg font-medium mb-2">About TaskZenith</h3>
             <p className="text-sm text-muted-foreground">
                 TaskZenith is an AI-powered task management application designed to help you stay organized and productive.

@@ -9,6 +9,7 @@ import { useToast } from "@/hooks/use-toast";
 import type { Task } from '@/types';
 import { AddTaskDialog } from '@/components/add-task-dialog';
 import { useTasks } from '@/contexts/TaskContext'; // Import useTasks hook
+import { cn } from '@/lib/utils';
 
 export function KanbanBoard() {
   const { columns, setColumns, addTask, moveTask, deleteTask, updateTask } = useTasks(); // Use context
@@ -38,7 +39,8 @@ export function KanbanBoard() {
 
   const handleDragStart = (e: React.DragEvent<HTMLDivElement>, task: Task) => {
     setDraggedTask(task);
-    e.currentTarget.style.opacity = '0.5'; // Visual feedback for dragging
+    e.currentTarget.classList.add('opacity-50', 'shadow-2xl', 'scale-105'); // Visual feedback for dragging
+    e.currentTarget.classList.remove('hover:shadow-xl', 'hover:-translate-y-1');
   };
 
   const handleDragOver = (e: React.DragEvent<HTMLDivElement>, columnId: 'todo' | 'inProgress' | 'done') => {
@@ -52,15 +54,21 @@ export function KanbanBoard() {
 
   const handleDrop = (e: React.DragEvent<HTMLDivElement>, targetColumnId: 'todo' | 'inProgress' | 'done') => {
     e.preventDefault();
-    if (!draggedTask || draggedTask.status === targetColumnId) {
-      if (draggedTask) {
-          const taskElement = document.getElementById(`task-${draggedTask.id}`);
-          if (taskElement) taskElement.style.opacity = '1';
-      }
+    if (!draggedTask) return;
+
+
+    const taskElement = document.getElementById(`task-${draggedTask.id}`);
+    if (taskElement) {
+        taskElement.classList.remove('opacity-50', 'shadow-2xl', 'scale-105');
+        taskElement.classList.add('hover:shadow-xl', 'hover:-translate-y-1');
+    }
+    
+    if (draggedTask.status === targetColumnId) {
       setDraggedTask(null);
       setDragOverColumn(null);
       return;
     }
+
 
     const isMovingToDone = targetColumnId === 'done' && draggedTask.status !== 'done';
 
@@ -81,18 +89,18 @@ export function KanbanBoard() {
         });
     }
 
-
-    const taskElement = document.getElementById(`task-${draggedTask.id}`);
-    if (taskElement) taskElement.style.opacity = '1';
     setDraggedTask(null);
     setDragOverColumn(null);
   };
 
   const handleDragEnd = (e: React.DragEvent<HTMLDivElement>) => {
-    // Reset opacity if drag was cancelled or ended outside a valid drop zone
+    // Reset visual feedback if drag was cancelled or ended outside a valid drop zone
     if (draggedTask) {
       const taskElement = document.getElementById(`task-${draggedTask.id}`);
-      if (taskElement) taskElement.style.opacity = '1';
+      if (taskElement) {
+        taskElement.classList.remove('opacity-50', 'shadow-2xl', 'scale-105');
+        taskElement.classList.add('hover:shadow-xl', 'hover:-translate-y-1');
+      }
     }
     setDraggedTask(null);
     setDragOverColumn(null);
@@ -153,7 +161,11 @@ export function KanbanBoard() {
         {columns.map(column => (
           <Card
             key={column.id}
-            className={`min-w-[300px] max-w-[350px] flex flex-col transition-colors duration-200 ${dragOverColumn === column.id ? 'bg-secondary/80 dark:bg-secondary/50' : 'bg-card'}`}
+            className={cn(
+                `min-w-[300px] max-w-[350px] flex flex-col transition-all duration-300 ease-in-out`,
+                dragOverColumn === column.id ? 'bg-secondary/80 dark:bg-secondary/50 shadow-xl scale-[1.02]' : 'bg-card',
+                'interactive-card-hover' // Apply common hover style
+            )}
             onDragOver={(e) => handleDragOver(e, column.id)}
             onDragLeave={handleDragLeave}
             onDrop={(e) => handleDrop(e, column.id)}
@@ -166,7 +178,7 @@ export function KanbanBoard() {
                 <div
                   key={task.id}
                   id={`task-${task.id}`}
-                  className="bg-background border p-3 rounded-lg shadow-sm cursor-grab active:cursor-grabbing transition-opacity duration-150 group relative dark:bg-neutral-800 dark:border-neutral-700"
+                  className="bg-background border p-3 rounded-lg shadow-sm cursor-grab active:cursor-grabbing transition-all duration-200 ease-in-out hover:shadow-xl hover:-translate-y-1 group relative dark:bg-neutral-800 dark:border-neutral-700"
                   draggable
                   onDragStart={(e) => handleDragStart(e, task)}
                   onDragEnd={handleDragEnd}
@@ -182,12 +194,12 @@ export function KanbanBoard() {
                       )}
                       {task.deadline && <span className="whitespace-nowrap">Due: {new Date(task.deadline).toLocaleDateString()}</span>}
                     </div>
-                    <div className="absolute top-1 right-1 flex space-x-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
-                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openEditTaskDialog(task)}>
+                    <div className="absolute top-1 right-1 flex space-x-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                      <Button variant="ghost" size="icon" className="h-6 w-6 hover:bg-accent/50" onClick={() => openEditTaskDialog(task)}>
                         <Edit2 className="h-3 w-3" />
                         <span className="sr-only">Edit task</span>
                       </Button>
-                      <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:text-destructive" onClick={() => handleDeleteTask(task.id, column.id)}>
+                      <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => handleDeleteTask(task.id, column.id)}>
                         <Trash2 className="h-3 w-3" />
                         <span className="sr-only">Delete task</span>
                       </Button>

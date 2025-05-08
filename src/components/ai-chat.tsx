@@ -31,7 +31,8 @@ export function AiChat() {
     if (scrollAreaRef.current) {
       const scrollViewport = scrollAreaRef.current.querySelector('div[data-radix-scroll-area-viewport]');
       if(scrollViewport) {
-        scrollViewport.scrollTop = scrollViewport.scrollHeight;
+        // scrollViewport.scrollTop = scrollViewport.scrollHeight; // Immediate scroll
+        scrollViewport.scrollTo({ top: scrollViewport.scrollHeight, behavior: 'smooth' }); // Smooth scroll
       }
     }
   }, [messages]);
@@ -59,6 +60,8 @@ export function AiChat() {
 
     try {
       const aiInput: ChatInput = { query: trimmedInput };
+      // Simulate API delay for testing animations
+      // await new Promise(resolve => setTimeout(resolve, 1500));
       const aiResponse: ChatOutput = await chatWithAI(aiInput);
 
       const aiMessage: Message = {
@@ -89,10 +92,10 @@ export function AiChat() {
   };
 
   return (
-    <Card className="flex flex-col h-full max-h-[calc(100vh-10rem)] w-full max-w-2xl mx-auto"> {/* Constrain width and height */}
-      <CardHeader className="border-b">
+    <Card className="flex flex-col h-full max-h-[calc(100vh-10rem)] w-full max-w-2xl mx-auto shadow-xl overflow-hidden"> {/* Constrain width and height, add shadow */}
+      <CardHeader className="border-b bg-card/80 backdrop-blur-sm">
         <CardTitle className="flex items-center gap-2 text-lg font-medium">
-          <Bot className="h-5 w-5" /> AI Assistant
+          <Bot className="h-5 w-5 text-primary" /> AI Assistant
         </CardTitle>
       </CardHeader>
       <CardContent className="flex-1 p-0">
@@ -102,21 +105,21 @@ export function AiChat() {
               <div
                 key={message.id}
                 className={cn(
-                  'flex items-start gap-3',
+                  'flex items-end gap-3 animate-fadeInUp', // Added animate-fadeInUp
                   message.sender === 'user' ? 'justify-end' : 'justify-start'
                 )}
               >
                 {message.sender === 'ai' && (
-                  <Avatar className="h-8 w-8 border">
-                     <AvatarFallback><Bot className="h-4 w-4" /></AvatarFallback>
+                  <Avatar className="h-8 w-8 border shadow-sm">
+                     <AvatarFallback><Bot className="h-4 w-4 text-primary" /></AvatarFallback>
                   </Avatar>
                 )}
                 <div
                   className={cn(
-                    'max-w-[75%] rounded-lg p-3 text-sm shadow', // Added shadow for better visibility
+                    'max-w-[75%] rounded-xl p-3 text-sm shadow-md transition-all duration-200 ease-in-out', // Rounded-xl, shadow-md
                     message.sender === 'user'
-                      ? 'bg-primary text-primary-foreground'
-                      : 'bg-muted text-muted-foreground' // Changed to muted for AI
+                      ? 'bg-primary text-primary-foreground rounded-br-none' // More distinct user bubble
+                      : 'bg-muted text-muted-foreground rounded-bl-none dark:bg-neutral-700 dark:text-neutral-100' // More distinct AI bubble
                   )}
                 >
                   {typeof message.text === 'string' ? (
@@ -126,26 +129,26 @@ export function AiChat() {
                   )}
                 </div>
                  {message.sender === 'user' && (
-                  <Avatar className="h-8 w-8 border">
+                  <Avatar className="h-8 w-8 border shadow-sm">
                      <AvatarFallback><User className="h-4 w-4" /></AvatarFallback>
                   </Avatar>
                 )}
               </div>
             ))}
             {isLoading && (
-              <div className="flex items-start gap-3 justify-start">
+              <div className="flex items-start gap-3 justify-start animate-fadeIn">
                 <Avatar className="h-8 w-8 border">
-                    <AvatarFallback><Bot className="h-4 w-4 animate-pulse" /></AvatarFallback>
+                    <AvatarFallback><Bot className="h-4 w-4 animate-pulse text-primary" /></AvatarFallback>
                 </Avatar>
-                <div className="bg-muted rounded-lg p-3 shadow">
-                    <Skeleton className="h-4 w-24" />
+                <div className="bg-muted dark:bg-neutral-700 rounded-xl p-3 shadow-md">
+                    <Skeleton className="h-4 w-24 bg-muted-foreground/20 dark:bg-neutral-600" />
                 </div>
               </div>
             )}
           </div>
         </ScrollArea>
       </CardContent>
-      <CardFooter className="p-4 border-t">
+      <CardFooter className="p-4 border-t bg-card/80 backdrop-blur-sm">
         <form onSubmit={handleSendMessage} className="flex w-full items-center space-x-2">
           <Input
             ref={inputRef}
@@ -153,10 +156,10 @@ export function AiChat() {
             onChange={(e) => setInputValue(e.target.value)}
             placeholder="Ask the AI about your tasks..."
             disabled={isLoading}
-            className="flex-1"
+            className="flex-1 transition-shadow duration-200 focus:shadow-md"
             autoComplete="off"
           />
-          <Button type="submit" size="icon" disabled={isLoading || !inputValue.trim()}>
+          <Button type="submit" size="icon" disabled={isLoading || !inputValue.trim()} className="transition-transform active:scale-90">
             <Send className="h-4 w-4" />
             <span className="sr-only">Send message</span>
           </Button>

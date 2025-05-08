@@ -9,6 +9,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Terminal, CheckCircle, AlertCircle, Info, Loader2 } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import type { Task } from '@/types';
+import { cn } from '@/lib/utils';
 
 export function PrioritizeTasksView() {
   const { getAllTasks } = useTasks();
@@ -45,6 +46,8 @@ export function PrioritizeTasksView() {
     const input: PrioritizeTasksInput = { tasks: tasksToPrioritize };
 
     try {
+      // Simulate API delay for testing animations
+      // await new Promise(resolve => setTimeout(resolve, 1500));
       const result = await prioritizeTasks(input);
       setPrioritizedResult(result);
     } catch (err) {
@@ -62,7 +65,7 @@ export function PrioritizeTasksView() {
   };
 
   return (
-    <Card className="max-w-3xl mx-auto">
+    <Card className="max-w-3xl mx-auto shadow-xl interactive-card-hover">
       <CardHeader>
         <CardTitle>AI Task Prioritization</CardTitle>
         <CardDescription>
@@ -71,7 +74,7 @@ export function PrioritizeTasksView() {
       </CardHeader>
       <CardContent className="space-y-6">
         {error && (
-          <Alert variant="destructive">
+          <Alert variant="destructive" className="animate-fadeIn">
             <AlertCircle className="h-4 w-4" />
             <AlertTitle>Error</AlertTitle>
             <AlertDescription>{error}</AlertDescription>
@@ -79,7 +82,7 @@ export function PrioritizeTasksView() {
         )}
 
         {currentTasks.filter(task => task.status !== 'done').length === 0 && !isLoading && !prioritizedResult && !error && (
-            <Alert>
+            <Alert className="animate-fadeIn">
                 <Info className="h-4 w-4" />
                 <AlertTitle>No Tasks to Prioritize</AlertTitle>
                 <AlertDescription>
@@ -104,7 +107,7 @@ export function PrioritizeTasksView() {
         </Button>
 
         {prioritizedResult && prioritizedResult.prioritizedTasks.length > 0 && (
-          <div className="space-y-4">
+          <div className="space-y-4 animate-fadeInUp">
             <h3 className="text-lg font-semibold text-center">Prioritization Results</h3>
              <Alert variant="default" className="bg-primary/10 border-primary/30">
                 <CheckCircle className="h-4 w-4 text-primary" />
@@ -113,15 +116,15 @@ export function PrioritizeTasksView() {
                     Here are your tasks sorted by AI-determined priority. Focus on the tasks at the top of the list first.
                 </AlertDescription>
             </Alert>
-            <ScrollArea className="h-[400px] rounded-md border p-4">
+            <ScrollArea className="h-[400px] rounded-md border p-4 shadow-inner bg-background/50 dark:bg-neutral-800/30">
               <ul className="space-y-3">
                 {prioritizedResult.prioritizedTasks.sort((a,b) => a.priority - b.priority).map((pTask, index) => (
-                  <li key={pTask.id} className="p-3 rounded-md shadow-sm bg-muted/50 dark:bg-muted/20">
+                  <li key={pTask.id} className={cn("p-3 rounded-md shadow-sm bg-muted/50 dark:bg-muted/20 interactive-card-hover transform hover:scale-[1.01]", "animate-fadeInUp")} style={{ animationDelay: `${index * 50}ms`}}>
                     <div className="flex items-start justify-between">
                         <h4 className="font-medium text-base">
                            {index + 1}. {getTaskContentById(pTask.id)}
                         </h4>
-                        <span className="text-sm font-semibold px-2 py-1 rounded-full bg-primary text-primary-foreground">
+                        <span className="text-sm font-semibold px-2 py-1 rounded-full bg-primary text-primary-foreground shadow-sm">
                             Priority: {pTask.priority}
                         </span>
                     </div>
@@ -133,7 +136,7 @@ export function PrioritizeTasksView() {
           </div>
         )}
          {prioritizedResult && prioritizedResult.prioritizedTasks.length === 0 && !isLoading && (
-             <Alert>
+             <Alert className="animate-fadeIn">
                 <Terminal className="h-4 w-4" />
                 <AlertTitle>No Prioritized Tasks Returned</AlertTitle>
                 <AlertDescription>
@@ -142,7 +145,7 @@ export function PrioritizeTasksView() {
             </Alert>
         )}
       </CardContent>
-       <CardFooter className="text-xs text-muted-foreground">
+       <CardFooter className="text-xs text-muted-foreground pt-4 border-t">
             Note: AI prioritization is a suggestion. Use your best judgment to adjust as needed.
        </CardFooter>
     </Card>

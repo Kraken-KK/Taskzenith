@@ -16,6 +16,7 @@ import { Lightbulb, Check, AlertCircle, Loader2, PlusCircle } from 'lucide-react
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useToast } from '@/hooks/use-toast';
+import { cn } from '@/lib/utils';
 
 const smartCreateFormSchema = z.object({
   userGoals: z.string().min(10, { message: 'Please describe your goals in a bit more detail (min 10 characters).' }).max(500, { message: 'Goals description is too long (max 500 characters).' }),
@@ -52,6 +53,8 @@ export function SmartTaskCreationView() {
     };
 
     try {
+      // Simulate API delay for testing animations
+      // await new Promise(resolve => setTimeout(resolve, 1500));
       const result: SmartTaskCreationOutput = await smartTaskCreation(input);
       if (result.suggestedTasks && result.suggestedTasks.length > 0) {
         setSuggestedTasks(result.suggestedTasks);
@@ -98,7 +101,7 @@ export function SmartTaskCreationView() {
   };
 
   return (
-    <Card className="max-w-3xl mx-auto">
+    <Card className="max-w-3xl mx-auto shadow-xl interactive-card-hover">
       <CardHeader>
         <CardTitle>Smart Task Creation</CardTitle>
         <CardDescription>
@@ -117,12 +120,12 @@ export function SmartTaskCreationView() {
                   id="userGoals"
                   placeholder="e.g., Launch a new product by Q4, Improve team productivity by 15%"
                   {...field}
-                  className="mt-1"
+                  className="mt-1 transition-shadow duration-200 focus:shadow-lg"
                 />
               )}
             />
             {form.formState.errors.userGoals && (
-              <p className="text-sm text-destructive mt-1">{form.formState.errors.userGoals.message}</p>
+              <p className="text-sm text-destructive mt-1 animate-fadeIn">{form.formState.errors.userGoals.message}</p>
             )}
           </div>
           <div>
@@ -135,12 +138,12 @@ export function SmartTaskCreationView() {
                   id="currentProjects"
                   placeholder="e.g., Website Redesign, Marketing Campaign X, Mobile App v2"
                   {...field}
-                  className="mt-1"
+                  className="mt-1 transition-shadow duration-200 focus:shadow-lg"
                 />
               )}
             />
             {form.formState.errors.currentProjects && (
-              <p className="text-sm text-destructive mt-1">{form.formState.errors.currentProjects.message}</p>
+              <p className="text-sm text-destructive mt-1 animate-fadeIn">{form.formState.errors.currentProjects.message}</p>
             )}
           </div>
           <Button type="submit" disabled={isLoading} className="w-full">
@@ -159,7 +162,7 @@ export function SmartTaskCreationView() {
         </form>
 
         {error && (
-          <Alert variant="destructive">
+          <Alert variant="destructive" className="animate-fadeIn">
             <AlertCircle className="h-4 w-4" />
             <AlertTitle>Error</AlertTitle>
             <AlertDescription>{error}</AlertDescription>
@@ -167,18 +170,26 @@ export function SmartTaskCreationView() {
         )}
 
         {suggestedTasks.length > 0 && (
-          <div className="space-y-4 pt-4">
+          <div className="space-y-4 pt-4 animate-fadeInUp">
             <h3 className="text-lg font-semibold">Suggested Tasks:</h3>
-            <ScrollArea className="h-[300px] rounded-md border p-4">
+            <ScrollArea className="h-[300px] rounded-md border p-4 shadow-inner bg-background/50 dark:bg-neutral-800/30">
               <ul className="space-y-2">
                 {suggestedTasks.map((task, index) => (
-                  <li key={index} className="flex items-center space-x-3 p-2 rounded-md hover:bg-muted/50 dark:hover:bg-muted/20">
+                  <li 
+                    key={index} 
+                    className={cn(
+                      "flex items-center space-x-3 p-2 rounded-md hover:bg-muted/50 dark:hover:bg-muted/20 interactive-card-hover transform hover:scale-[1.01]",
+                      "animate-fadeInUp"
+                    )}
+                    style={{ animationDelay: `${index * 75}ms` }}
+                  >
                     <Checkbox
                       id={`task-${index}`}
                       checked={selectedTasks.includes(task)}
                       onCheckedChange={() => handleToggleTaskSelection(task)}
+                      className="transition-transform active:scale-90"
                     />
-                    <label htmlFor={`task-${index}`} className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 flex-1">
+                    <label htmlFor={`task-${index}`} className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 flex-1 cursor-pointer">
                       {task}
                     </label>
                   </li>
@@ -192,7 +203,7 @@ export function SmartTaskCreationView() {
           </div>
         )}
         { !isLoading && form.formState.isSubmitSuccessful && suggestedTasks.length === 0 && !error && (
-             <Alert>
+             <Alert className="animate-fadeIn">
                 <AlertCircle className="h-4 w-4" />
                 <AlertTitle>No Suggestions</AlertTitle>
                 <AlertDescription>
@@ -202,7 +213,7 @@ export function SmartTaskCreationView() {
             </Alert>
         )}
       </CardContent>
-      <CardFooter className="text-xs text-muted-foreground">
+      <CardFooter className="text-xs text-muted-foreground pt-4 border-t">
         The more detailed your input, the better the AI's suggestions will be.
       </CardFooter>
     </Card>

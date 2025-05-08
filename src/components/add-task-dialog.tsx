@@ -102,7 +102,7 @@ export function AddTaskDialog({ open, onOpenChange, onAddTask, children, initial
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       {children && <DialogTrigger asChild>{children}</DialogTrigger>}
-      <DialogContent className="sm:max-w-[425px]">
+      <DialogContent className="sm:max-w-[425px] data-[state=open]:animate-fadeInUp data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0">
         <DialogHeader>
           <DialogTitle>{initialTaskData ? 'Edit Task' : 'Add New Task'}</DialogTitle>
           <DialogDescription>
@@ -118,7 +118,7 @@ export function AddTaskDialog({ open, onOpenChange, onAddTask, children, initial
                 <FormItem>
                   <FormLabel>Task *</FormLabel>
                   <FormControl>
-                    <Input placeholder="e.g., Finalize project report" {...field} />
+                    <Input placeholder="e.g., Finalize project report" {...field} className="transition-shadow duration-200 focus:shadow-md" />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -133,7 +133,7 @@ export function AddTaskDialog({ open, onOpenChange, onAddTask, children, initial
                   <FormControl>
                     <Textarea
                       placeholder="Add more details about the task..."
-                      className="resize-none"
+                      className="resize-none transition-shadow duration-200 focus:shadow-md"
                       {...field}
                       value={field.value ?? ''} // Handle null value
                     />
@@ -151,7 +151,7 @@ export function AddTaskDialog({ open, onOpenChange, onAddTask, children, initial
                     <FormLabel>Priority</FormLabel>
                     <Select onValueChange={field.onChange} value={field.value} defaultValue={field.value}>
                       <FormControl>
-                        <SelectTrigger>
+                        <SelectTrigger className="transition-shadow duration-200 focus:shadow-md">
                           <SelectValue placeholder="Select priority" />
                         </SelectTrigger>
                       </FormControl>
@@ -177,7 +177,7 @@ export function AddTaskDialog({ open, onOpenChange, onAddTask, children, initial
                           <Button
                             variant={'outline'}
                             className={cn(
-                              'w-full pl-3 text-left font-normal',
+                              'w-full pl-3 text-left font-normal transition-shadow duration-200 hover:shadow-sm focus:shadow-md',
                               !field.value && 'text-muted-foreground'
                             )}
                           >
