@@ -1,10 +1,10 @@
 'use client';
 
-import React, { useEffect } from 'react';
+import React from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
-import { format, parseISO } from 'date-fns';
+import { format } from 'date-fns';
 import { CalendarIcon } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
@@ -38,14 +38,14 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Calendar } from '@/components/ui/calendar';
 import { cn } from '@/lib/utils';
 import type { Task } from '@/types';
-import { useSettings } from '@/contexts/SettingsContext'; // Import useSettings
+import { useSettings } from '@/contexts/SettingsContext'; 
 
 const taskFormSchema = z.object({
-  content: z.string().min(1, { message: 'Task content cannot be empty.' }).max(200, { message: 'Task content is too long.' }),
-  description: z.string().max(500, { message: 'Description is too long.' }).optional().nullable(),
-  priority: z.enum(['low', 'medium', 'high']).optional(),
-  deadline: z.date().optional().nullable(),
-  tags: z.string().optional().nullable(), // Tags as comma-separated string
+  content: z.string().min(1, { message: 'Task content cannot be empty.' }),
+  description: z.string().optional(),
+  priority: z.enum(['low', 'medium', 'high']),
+  deadline: z.date().optional(),
+  dependencies: z.string().optional(), // Comma-separated task IDs
 });
 
 type TaskFormValues = z.infer<typeof taskFormSchema>;
@@ -53,12 +53,11 @@ type TaskFormValues = z.infer<typeof taskFormSchema>;
 interface AddTaskDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onAddTask: (taskData: Omit<Task, 'id' | 'status'>) => void;
+  onAddTask: (taskData: Omit<Task, 'id' | 'status' | 'createdAt'>) => void;
   children?: React.ReactNode;
-  initialTaskData?: Partial<Task>; // For editing
 }
 
-export function AddTaskDialog({ open, onOpenChange, onAddTask, children, initialTaskData }: AddTaskDialogProps) {
+export function AddTaskDialog({ open, onOpenChange, onAddTask, children }: AddTaskDialogProps) {
   const { isBetaModeEnabled } = useSettings();
   const form = useForm<TaskFormValues>({
     resolver: zodResolver(taskFormSchema),
@@ -67,54 +66,31 @@ export function AddTaskDialog({ open, onOpenChange, onAddTask, children, initial
       description: '',
       priority: 'medium',
       deadline: undefined,
-      tags: '',
+      dependencies: '',
     },
   });
 
-  useEffect(() => {
-    if (open) {
-      if (initialTaskData) {
-        form.reset({
-          content: initialTaskData.content || '',
-          description: initialTaskData.description || '',
-          priority: initialTaskData.priority || 'medium',
-          deadline: initialTaskData.deadline ? parseISO(initialTaskData.deadline) : undefined,
-          tags: initialTaskData.tags ? initialTaskData.tags.join(', ') : '',
-        });
-      } else {
-        form.reset({
-            content: '',
-            description: '',
-            priority: 'medium',
-            deadline: undefined,
-            tags: '',
-        });
-      }
-    }
-  }, [open, initialTaskData, form]);
-
-
   function onSubmit(data: TaskFormValues) {
-    const parsedTags = data.tags ? data.tags.split(',').map(tag => tag.trim()).filter(tag => tag) : [];
-    const taskData: Omit<Task, 'id' | 'status'> = {
+    const dependenciesArray = data.dependencies ? data.dependencies.split(',').map(dep => dep.trim()) : [];
+
+    const taskDataToSubmit: Omit<Task, 'id' | 'status' | 'createdAt'> = {
       content: data.content,
-      description: data.description || undefined,
+      description: data.description,
       priority: data.priority,
-      deadline: data.deadline ? format(data.deadline, 'yyyy-MM-dd') : undefined,
-      tags: isBetaModeEnabled ? parsedTags : undefined,
-      checklist: isBetaModeEnabled ? (initialTaskData?.checklist || []) : undefined, // Preserve or init checklist
+      deadline: data.deadline?.toISOString(),
+      dependencies: isBetaModeEnabled ? dependenciesArray : [],
     };
-    onAddTask(taskData);
+    onAddTask(taskDataToSubmit);
   }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       {children && <DialogTrigger asChild>{children}</DialogTrigger>}
-      <DialogContent className="sm:max-w-[425px] data-[state=open]:animate-fadeInUp data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0">
+      <DialogContent className="sm:max-w-[425px]">
         <DialogHeader>
-          <DialogTitle>{initialTaskData ? 'Edit Task' : 'Add New Task'}</DialogTitle>
+          <DialogTitle>Add New Task</DialogTitle>
           <DialogDescription>
-            {initialTaskData ? 'Update the details of your task.' : "Fill in the details for your new task. Click save when you're done."}
+            Fill in the details for your new task. Click save when you're done.
           </DialogDescription>
         </DialogHeader>
         <Form {...form}>
@@ -124,9 +100,9 @@ export function AddTaskDialog({ open, onOpenChange, onAddTask, children, initial
               name="content"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Task *</FormLabel>
+                  <FormLabel>Task</FormLabel>
                   <FormControl>
-                    <Input placeholder="e.g., Finalize project report" {...field} className="transition-shadow duration-200 focus:shadow-md" />
+                    <Input placeholder="e.g., Finalize project report" {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -137,14 +113,9 @@ export function AddTaskDialog({ open, onOpenChange, onAddTask, children, initial
               name="description"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Description (Optional)</FormLabel>
+                  <FormLabel>Description</FormLabel>
                   <FormControl>
-                    <Textarea
-                      placeholder="Add more details about the task..."
-                      className="resize-none transition-shadow duration-200 focus:shadow-md"
-                      {...field}
-                      value={field.value ?? ''}
-                    />
+                    <Textarea placeholder="Add more details about the task..." className="resize-none" {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -153,12 +124,12 @@ export function AddTaskDialog({ open, onOpenChange, onAddTask, children, initial
             {isBetaModeEnabled && (
               <FormField
                 control={form.control}
-                name="tags"
+                name="dependencies"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Tags (Beta - comma separated)</FormLabel>
+                    <FormLabel>Dependencies (Beta - Task IDs, comma separated)</FormLabel>
                     <FormControl>
-                      <Input placeholder="e.g., urgent, marketing, dev" {...field} value={field.value ?? ''} className="transition-shadow duration-200 focus:shadow-md" />
+                      <Input placeholder="e.g., task-123, task-456" {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -172,9 +143,9 @@ export function AddTaskDialog({ open, onOpenChange, onAddTask, children, initial
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Priority</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value} defaultValue={field.value}>
+                    <Select onValueChange={field.onChange} defaultValue={field.value}>
                       <FormControl>
-                        <SelectTrigger className="transition-shadow duration-200 focus:shadow-md">
+                        <SelectTrigger>
                           <SelectValue placeholder="Select priority" />
                         </SelectTrigger>
                       </FormControl>
@@ -193,14 +164,14 @@ export function AddTaskDialog({ open, onOpenChange, onAddTask, children, initial
                 name="deadline"
                 render={({ field }) => (
                   <FormItem className="flex flex-col">
-                    <FormLabel>Deadline (Optional)</FormLabel>
+                    <FormLabel>Deadline</FormLabel>
                     <Popover>
                       <PopoverTrigger asChild>
                         <FormControl>
                           <Button
                             variant={'outline'}
                             className={cn(
-                              'w-full pl-3 text-left font-normal transition-shadow duration-200 hover:shadow-sm focus:shadow-md',
+                              'w-full pl-3 text-left font-normal',
                               !field.value && 'text-muted-foreground'
                             )}
                           >
@@ -216,7 +187,7 @@ export function AddTaskDialog({ open, onOpenChange, onAddTask, children, initial
                       <PopoverContent className="w-auto p-0" align="start">
                         <Calendar
                           mode="single"
-                          selected={field.value || undefined}
+                          selected={field.value}
                           onSelect={field.onChange}
                           disabled={(date) =>
                             date < new Date(new Date().setHours(0, 0, 0, 0))
@@ -231,8 +202,7 @@ export function AddTaskDialog({ open, onOpenChange, onAddTask, children, initial
               />
             </div>
             <DialogFooter>
-                <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-              <Button type="submit">{initialTaskData ? 'Save Changes' : 'Add Task'}</Button>
+              <Button type="submit">Add Task</Button>
             </DialogFooter>
           </form>
         </Form>

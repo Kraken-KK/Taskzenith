@@ -1,9 +1,11 @@
+// src/contexts/TaskContext.tsx
 'use client';
 
 import type { Task, Column, ChecklistItem } from '@/types';
 import type { ReactNode } from 'react';
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { useToast } from "@/hooks/use-toast";
+import { formatISO } from 'date-fns';
 
 // Helper to generate unique IDs
 const generateId = (prefix: string = 'id') => `${prefix}-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
@@ -14,8 +16,8 @@ const initialColumnsData: Column[] = [
     id: generateId('col'),
     title: 'To Do',
     tasks: [
-      { id: generateId('task'), content: 'Design the user interface mockup', status: '', priority: 'high', deadline: '2024-08-15', description: 'Create mockups for the main board and task details.', tags: ['design', 'UI'], checklist: [{id: generateId('cl'), text: 'Research color palettes', completed: true}, {id: generateId('cl'), text: 'Sketch wireframes', completed: false}] },
-      { id: generateId('task'), content: 'Set up the project structure', status: '', priority: 'medium', description: 'Initialize Next.js, install dependencies, configure Tailwind.', tags: ['dev', 'setup'] },
+      { id: generateId('task'), content: 'Design the user interface mockup', status: '', priority: 'high', deadline: '2024-08-15', description: 'Create mockups for the main board and task details.', tags: ['design', 'UI'], checklist: [{id: generateId('cl'), text: 'Research color palettes', completed: true}, {id: generateId('cl'), text: 'Sketch wireframes', completed: false}], dependencies: [], createdAt: formatISO(new Date()) },
+      { id: generateId('task'), content: 'Set up the project structure', status: '', priority: 'medium', description: 'Initialize Next.js, install dependencies, configure Tailwind.', tags: ['dev', 'setup'], checklist: [], dependencies: [], createdAt: formatISO(new Date()) },
     ],
     wipLimit: 5,
   },
@@ -23,7 +25,7 @@ const initialColumnsData: Column[] = [
     id: generateId('col'),
     title: 'In Progress',
     tasks: [
-      { id: generateId('task'), content: 'Develop the Kanban board component', status: '', priority: 'high', description: 'Build the main drag-and-drop interface.', tags: ['dev', 'kanban'] },
+      { id: generateId('task'), content: 'Develop the Kanban board component', status: '', priority: 'high', description: 'Build the main drag-and-drop interface.', tags: ['dev', 'kanban'], checklist: [], dependencies: [], createdAt: formatISO(new Date()) },
     ],
     wipLimit: 3,
   },
@@ -31,19 +33,19 @@ const initialColumnsData: Column[] = [
     id: generateId('col'),
     title: 'Done',
     tasks: [
-      { id: generateId('task'), content: 'Gather project requirements', status: '', description: 'Define features and user stories.', tags: ['planning'] },
+      { id: generateId('task'), content: 'Gather project requirements', status: '', description: 'Define features and user stories.', tags: ['planning'], checklist: [], dependencies: [], createdAt: formatISO(new Date()) },
     ],
   },
 ];
 
-// Assign initial status to tasks based on their column
+// Assign initial status to tasks and ensure all fields are present
 initialColumnsData.forEach(col => {
   col.tasks.forEach(task => {
     task.status = col.id;
-    // Ensure checklist exists if not provided in initial data for some tasks
-    if (task.checklist === undefined) {
-        task.checklist = [];
-    }
+    if (task.checklist === undefined) task.checklist = [];
+    if (task.dependencies === undefined) task.dependencies = [];
+    if (task.tags === undefined) task.tags = [];
+    if (task.createdAt === undefined) task.createdAt = formatISO(new Date());
   });
 });
 
@@ -51,10 +53,10 @@ initialColumnsData.forEach(col => {
 interface TaskContextType {
   columns: Column[];
   setColumns: React.Dispatch<React.SetStateAction<Column[]>>;
-  addTask: (taskData: Omit<Task, 'id' | 'status'>, targetColumnId?: Column['id']) => void;
-  moveTask: (taskId: string, sourceColumnId: Column['id'], targetColumnId: Column['id']) => Task | null;
+  addTask: (taskData: Omit<Task, 'id' | 'status' | 'createdAt' | 'dependencies' | 'checklist' | 'tags'> & Partial<Pick<Task, 'dependencies' | 'checklist' | 'tags' | 'description' | 'deadline'>>, targetColumnId?: Column['id']) => void;
+  moveTask: (taskId: string, sourceColumnId: Column['id'], targetColumnId: Column['id'], isBetaModeActive: boolean) => { task: Task | null, automated: boolean };
   deleteTask: (taskId: string, columnId: Column['id']) => void;
-  updateTask: (updatedTask: Task) => void;
+  updateTask: (updatedTaskData: Partial<Task> & { id: string }) => void;
   getTaskById: (taskId: string) => Task | undefined;
   getAllTasks: () => Task[];
   addColumn: (title: string) => void;
@@ -76,14 +78,13 @@ export function TaskProvider({ children }: { children: ReactNode }) {
       if (savedTasks) {
         try {
           const parsed = JSON.parse(savedTasks) as Column[];
-          // Basic validation to ensure it's an array and items have id and title
           if (Array.isArray(parsed) && parsed.every(col => col.id && col.title && Array.isArray(col.tasks))) {
-            // Ensure all tasks have a checklist array
             parsed.forEach(col => {
               col.tasks.forEach(task => {
-                if (!Array.isArray(task.checklist)) {
-                  task.checklist = [];
-                }
+                if (!Array.isArray(task.checklist)) task.checklist = [];
+                if (!Array.isArray(task.dependencies)) task.dependencies = [];
+                if (!Array.isArray(task.tags)) task.tags = [];
+                if (!task.createdAt) task.createdAt = formatISO(new Date());
               });
             });
             return parsed;
@@ -104,7 +105,7 @@ export function TaskProvider({ children }: { children: ReactNode }) {
     }
   }, [columns]);
 
-  const addTask = (taskData: Omit<Task, 'id' | 'status'>, targetColumnId?: Column['id']) => {
+  const addTask = (taskData: Omit<Task, 'id' | 'status' | 'createdAt' | 'dependencies' | 'checklist' | 'tags'> & Partial<Pick<Task, 'dependencies' | 'checklist' | 'tags' | 'description' | 'deadline'>>, targetColumnId?: Column['id']) => {
     const finalTargetColumnId = targetColumnId || (columns.length > 0 ? columns[0].id : undefined);
 
     if (!finalTargetColumnId) {
@@ -117,11 +118,16 @@ export function TaskProvider({ children }: { children: ReactNode }) {
     }
     
     const newTask: Task = {
-      ...taskData,
       id: generateId('task'),
+      content: taskData.content,
       status: finalTargetColumnId,
+      priority: taskData.priority,
+      deadline: taskData.deadline || undefined,
+      dependencies: taskData.dependencies || [],
+      description: taskData.description || undefined,
       tags: taskData.tags || [],
       checklist: taskData.checklist || [],
+      createdAt: formatISO(new Date()),
     };
 
     setColumns(prevColumns => {
@@ -135,16 +141,12 @@ export function TaskProvider({ children }: { children: ReactNode }) {
       }
       return newColumns;
     });
-
-    const targetColumnObj = columns.find(c => c.id === finalTargetColumnId);
-    toast({
-      title: "Task Added",
-      description: `"${newTask.content}" added to ${targetColumnObj?.title || 'selected column'}.`,
-    });
   };
 
-  const moveTask = (taskId: string, sourceColumnId: Column['id'], targetColumnId: Column['id']): Task | null => {
+  const moveTask = (taskId: string, sourceColumnId: Column['id'], targetColumnId: Column['id'], isBetaModeActive: boolean) => {
     let movedTask: Task | null = null;
+    let automationApplied = false;
+
     setColumns(prevColumns => {
       const newColumns = prevColumns.map(col => ({
         ...col,
@@ -162,50 +164,44 @@ export function TaskProvider({ children }: { children: ReactNode }) {
       [movedTask] = sourceCol.tasks.splice(taskIndex, 1);
       if (movedTask) {
         movedTask.status = targetColumnId;
+
+        if (isBetaModeActive && targetCol.title.toLowerCase() === 'done' && movedTask.checklist && movedTask.checklist.length > 0) {
+          movedTask.checklist.forEach(item => {
+            if (!item.completed) {
+                 item.completed = true;
+                 automationApplied = true; // Set flag only if an item was actually changed
+            }
+          });
+        }
         targetCol.tasks.push(movedTask);
       }
       return newColumns;
     });
-    return movedTask;
+    return { task: movedTask, automated: automationApplied };
   };
 
   const deleteTask = (taskId: string, columnId: Column['id']) => {
-    let deletedTaskContent: string | undefined;
     setColumns(prevColumns => {
-        const newColumns = prevColumns.map(col => {
-            if (col.id === columnId) {
-                const taskToDelete = col.tasks.find(t => t.id === taskId);
-                if (taskToDelete) deletedTaskContent = taskToDelete.content;
-                return {
-                    ...col,
-                    tasks: col.tasks.filter(task => task.id !== taskId),
-                };
-            }
-            return col;
-        });
-        return newColumns;
+      return prevColumns.map(col => {
+        if (col.id === columnId) {
+          col.tasks = col.tasks.filter(task => task.id !== taskId);
+        }
+        return col;
+      });
     });
-     if (deletedTaskContent) {
-        toast({
-            title: "Task Deleted",
-            description: `"${deletedTaskContent}" has been removed.`,
-            variant: "destructive"
-        });
-    }
   };
 
-  const updateTask = (updatedTask: Task) => {
+  const updateTask = (updatedTaskData: Partial<Task> & { id: string }) => {
     setColumns(prevColumns => {
-        return prevColumns.map(column => ({
-            ...column,
-            tasks: column.tasks.map(task =>
-                task.id === updatedTask.id ? { ...task, ...updatedTask, checklist: updatedTask.checklist || task.checklist || [] } : task
-            ),
-        }));
-    });
-    toast({
-        title: "Task Updated",
-        description: `"${updatedTask.content}" has been updated.`,
+      return prevColumns.map(column => {
+        column.tasks = column.tasks.map(task => {
+          if (task.id === updatedTaskData.id) {
+            task = { ...task, ...updatedTaskData };
+          }
+          return task;
+        });
+        return column;
+      });
     });
   };
 
@@ -223,30 +219,20 @@ export function TaskProvider({ children }: { children: ReactNode }) {
 
   // Column Management Functions
   const addColumn = (title: string) => {
-    if (!title.trim()) {
-        toast({ title: "Error", description: "Column title cannot be empty.", variant: "destructive" });
-        return;
-    }
     const newColumn: Column = {
       id: generateId('col'),
-      title: title.trim(),
+      title: title,
       tasks: [],
     };
     setColumns(prevColumns => [...prevColumns, newColumn]);
-    toast({ title: "Column Added", description: `Column "${title}" created.` });
   };
 
   const updateColumnTitle = (columnId: string, newTitle: string) => {
-    if (!newTitle.trim()) {
-        toast({ title: "Error", description: "Column title cannot be empty.", variant: "destructive" });
-        return;
-    }
     setColumns(prevColumns =>
       prevColumns.map(col =>
-        col.id === columnId ? { ...col, title: newTitle.trim() } : col
+        col.id === columnId ? { ...col, title: newTitle } : col
       )
     );
-    toast({ title: "Column Updated", description: `Column renamed to "${newTitle}".` });
   };
 
   const updateColumnWipLimit = (columnId: string, limit?: number) => {
@@ -255,44 +241,22 @@ export function TaskProvider({ children }: { children: ReactNode }) {
         col.id === columnId ? { ...col, wipLimit: limit } : col
       )
     );
-    const col = columns.find(c => c.id === columnId);
-    if (col) {
-      toast({ title: "WIP Limit Updated", description: `WIP Limit for "${col.title}" set to ${limit === undefined ? 'none' : limit}.` });
-    }
   };
 
   const deleteColumn = (columnId: string) => {
-    const columnToDelete = columns.find(col => col.id === columnId);
-    if (!columnToDelete) return;
-
-    if (columns.length <= 1) {
-        toast({ title: "Cannot Delete", description: "You must have at least one column.", variant: "destructive" });
-        return;
-    }
-
-    if (columnToDelete.tasks.length > 0) {
-      toast({ title: "Cannot Delete", description: `Column "${columnToDelete.title}" contains tasks. Please move or delete them first.`, variant: "destructive" });
-      return;
-    }
     setColumns(prevColumns => prevColumns.filter(col => col.id !== columnId));
-    toast({ title: "Column Deleted", description: `Column "${columnToDelete.title}" removed.` });
   };
 
   // Checklist item functions
   const addChecklistItem = (taskId: string, columnId: string, itemText: string) => {
-    if (!itemText.trim()) return;
-    const newItem: ChecklistItem = { id: generateId('cl-item'), text: itemText.trim(), completed: false };
     setColumns(prev => prev.map(col => {
       if (col.id === columnId) {
-        return {
-          ...col,
-          tasks: col.tasks.map(task => {
-            if (task.id === taskId) {
-              return { ...task, checklist: [...(task.checklist || []), newItem] };
-            }
-            return task;
-          })
-        };
+        col.tasks = col.tasks.map(task => {
+          if (task.id === taskId) {
+            task.checklist = [...(task.checklist || []), { id: generateId('cl-item'), text: itemText, completed: false }];
+          }
+          return task;
+        });
       }
       return col;
     }));
@@ -301,20 +265,17 @@ export function TaskProvider({ children }: { children: ReactNode }) {
   const toggleChecklistItem = (taskId: string, columnId: string, itemId: string) => {
     setColumns(prev => prev.map(col => {
       if (col.id === columnId) {
-        return {
-          ...col,
-          tasks: col.tasks.map(task => {
-            if (task.id === taskId) {
-              return {
-                ...task,
-                checklist: (task.checklist || []).map(item =>
-                  item.id === itemId ? { ...item, completed: !item.completed } : item
-                )
-              };
-            }
-            return task;
-          })
-        };
+        col.tasks = col.tasks.map(task => {
+          if (task.id === taskId) {
+            task.checklist = task.checklist.map(item => {
+              if (item.id === itemId) {
+                item.completed = !item.completed;
+              }
+              return item;
+            });
+          }
+          return task;
+        });
       }
       return col;
     }));
@@ -323,42 +284,31 @@ export function TaskProvider({ children }: { children: ReactNode }) {
   const deleteChecklistItem = (taskId: string, columnId: string, itemId: string) => {
     setColumns(prev => prev.map(col => {
       if (col.id === columnId) {
-        return {
-          ...col,
-          tasks: col.tasks.map(task => {
-            if (task.id === taskId) {
-              return { ...task, checklist: (task.checklist || []).filter(item => item.id !== itemId) };
-            }
-            return task;
-          })
-        };
+        col.tasks = col.tasks.map(task => {
+          if (task.id === taskId) {
+            task.checklist = task.checklist.filter(item => item.id !== itemId);
+          }
+          return task;
+        });
       }
       return col;
     }));
   };
   
   const updateChecklistItemText = (taskId: string, columnId: string, itemId: string, newText: string) => {
-    if (!newText.trim()) {
-      // Optionally delete if text is empty, or prevent update
-      deleteChecklistItem(taskId, columnId, itemId);
-      return;
-    }
     setColumns(prev => prev.map(col => {
       if (col.id === columnId) {
-        return {
-          ...col,
-          tasks: col.tasks.map(task => {
-            if (task.id === taskId) {
-              return {
-                ...task,
-                checklist: (task.checklist || []).map(item =>
-                  item.id === itemId ? { ...item, text: newText.trim() } : item
-                )
-              };
-            }
-            return task;
-          })
-        };
+        col.tasks = col.tasks.map(task => {
+          if (task.id === taskId) {
+            task.checklist = task.checklist.map(item => {
+              if (item.id === itemId) {
+                item.text = newText;
+              }
+              return item;
+            });
+          }
+          return task;
+        });
       }
       return col;
     }));
@@ -366,24 +316,7 @@ export function TaskProvider({ children }: { children: ReactNode }) {
 
 
   return (
-    <TaskContext.Provider value={{ 
-        columns, 
-        setColumns, 
-        addTask, 
-        moveTask, 
-        deleteTask, 
-        updateTask, 
-        getTaskById, 
-        getAllTasks,
-        addColumn,
-        updateColumnTitle,
-        deleteColumn,
-        updateColumnWipLimit,
-        addChecklistItem,
-        toggleChecklistItem,
-        deleteChecklistItem,
-        updateChecklistItemText,
-    }}>
+    <TaskContext.Provider value={{ columns, setColumns, addTask, moveTask, deleteTask, updateTask, getTaskById, getAllTasks, addColumn, updateColumnTitle, deleteColumn, updateColumnWipLimit, addChecklistItem, toggleChecklistItem, deleteChecklistItem, updateChecklistItemText }}>
       {children}
     </TaskContext.Provider>
   );
@@ -391,8 +324,9 @@ export function TaskProvider({ children }: { children: ReactNode }) {
 
 export function useTasks() {
   const context = useContext(TaskContext);
-  if (context === undefined) {
+  if (!context) {
     throw new Error('useTasks must be used within a TaskProvider');
   }
   return context;
 }
+

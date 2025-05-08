@@ -14,10 +14,11 @@ export interface Task {
   status: string; // Changed to string to support dynamic column IDs
   priority: 'high' | 'medium' | 'low';
   deadline?: string; // ISO string format recommended
-  dependencies?: string[]; // Array of task IDs this task depends on
+  dependencies: string[]; // Array of task IDs this task depends on
   description?: string; // More detailed description
-  tags?: string[]; // Added for beta feature: task tags
-  checklist?: ChecklistItem[]; // Added for beta feature: checklists
+  tags: string[]; // Task tags
+  checklist: ChecklistItem[]; // Checklists
+  createdAt: string; // ISO string format for task creation time
 }
 
 // Define the structure of a column on the Kanban board
