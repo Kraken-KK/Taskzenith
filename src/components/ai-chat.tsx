@@ -31,8 +31,7 @@ export function AiChat() {
     if (scrollAreaRef.current) {
       const scrollViewport = scrollAreaRef.current.querySelector('div[data-radix-scroll-area-viewport]');
       if(scrollViewport) {
-        // scrollViewport.scrollTop = scrollViewport.scrollHeight; // Immediate scroll
-        scrollViewport.scrollTo({ top: scrollViewport.scrollHeight, behavior: 'smooth' }); // Smooth scroll
+        scrollViewport.scrollTo({ top: scrollViewport.scrollHeight, behavior: 'smooth' });
       }
     }
   }, [messages]);
@@ -58,24 +57,40 @@ export function AiChat() {
     setInputValue('');
     setIsLoading(true);
 
+    // Add a placeholder AI message for a more immediate feel
+    const thinkingMessageId = `msg-${Date.now()}-ai-thinking`;
+    const thinkingMessage: Message = {
+        id: thinkingMessageId,
+        sender: 'ai',
+        text: (
+            <div className="flex items-center space-x-2">
+                <Skeleton className="h-3 w-3 rounded-full bg-muted-foreground/30 animate-pulse" />
+                <Skeleton className="h-3 w-3 rounded-full bg-muted-foreground/30 animate-pulse delay-100" />
+                <Skeleton className="h-3 w-3 rounded-full bg-muted-foreground/30 animate-pulse delay-200" />
+            </div>
+        ),
+        timestamp: Date.now(),
+    }
+    setMessages((prev) => [...prev, thinkingMessage]);
+
+
     try {
       const aiInput: ChatInput = { query: trimmedInput };
-      // Simulate API delay for testing animations
-      // await new Promise(resolve => setTimeout(resolve, 1500));
       const aiResponse: ChatOutput = await chatWithAI(aiInput);
 
       const aiMessage: Message = {
-        id: `msg-${Date.now()}-ai`,
+        id: `msg-${Date.now()}-ai`, // New ID for the actual response
         sender: 'ai',
         text: aiResponse.response,
         timestamp: Date.now(),
       };
-      setMessages((prev) => [...prev, aiMessage]);
+      // Replace the thinking message with the actual response
+      setMessages((prev) => prev.map(msg => msg.id === thinkingMessageId ? aiMessage : msg));
     } catch (error) {
       console.error('Error fetching AI response:', error);
       const errorMessageText = error instanceof Error ? error.message : 'An unknown error occurred.';
       const errorMessage: Message = {
-        id: `msg-${Date.now()}-error`,
+        id: `msg-${Date.now()}-error`, // New ID for the error
         sender: 'ai',
         text: (
             <span className="text-destructive">
@@ -84,63 +99,67 @@ export function AiChat() {
         ),
         timestamp: Date.now(),
       };
-      setMessages((prev) => [...prev, errorMessage]);
+      // Replace the thinking message with the error message
+      setMessages((prev) => prev.map(msg => msg.id === thinkingMessageId ? errorMessage : msg));
     } finally {
       setIsLoading(false);
-      inputRef.current?.focus(); // Re-focus input after response
+      inputRef.current?.focus();
     }
   };
 
   return (
-    <Card className="flex flex-col h-full max-h-[calc(100vh-10rem)] w-full max-w-2xl mx-auto shadow-xl overflow-hidden"> {/* Constrain width and height, add shadow */}
-      <CardHeader className="border-b bg-card/80 backdrop-blur-sm">
-        <CardTitle className="flex items-center gap-2 text-lg font-medium">
-          <Bot className="h-5 w-5 text-primary" /> AI Assistant
+    <Card className="flex flex-col h-full max-h-[calc(100vh-10rem)] w-full max-w-3xl mx-auto shadow-2xl overflow-hidden rounded-xl"> {/* Increased max-w, shadow, rounded */}
+      <CardHeader className="border-b bg-card/80 backdrop-blur-md"> {/* Slightly more blur */}
+        <CardTitle className="flex items-center gap-2 text-lg font-semibold">
+          <Bot className="h-6 w-6 text-primary" /> AI Assistant (Jack)
         </CardTitle>
       </CardHeader>
       <CardContent className="flex-1 p-0">
-        <ScrollArea className="h-full p-4" ref={scrollAreaRef}>
-          <div className="space-y-4">
+        <ScrollArea className="h-full p-4 pt-6" ref={scrollAreaRef}> {/* Added pt-6 for more space from header */}
+          <div className="space-y-6"> {/* Increased space-y */}
             {messages.map((message) => (
               <div
                 key={message.id}
                 className={cn(
-                  'flex items-end gap-3 animate-fadeInUp', // Added animate-fadeInUp
+                  'flex items-end gap-3 animate-fadeInUp',
                   message.sender === 'user' ? 'justify-end' : 'justify-start'
                 )}
               >
                 {message.sender === 'ai' && (
-                  <Avatar className="h-8 w-8 border shadow-sm">
-                     <AvatarFallback><Bot className="h-4 w-4 text-primary" /></AvatarFallback>
+                  <Avatar className="h-9 w-9 border-2 border-primary/50 shadow-md"> {/* Enhanced AI avatar */}
+                     <AvatarFallback className="bg-primary/10"><Bot className="h-5 w-5 text-primary" /></AvatarFallback>
                   </Avatar>
                 )}
                 <div
                   className={cn(
-                    'max-w-[75%] rounded-xl p-3 text-sm shadow-md transition-all duration-200 ease-in-out', // Rounded-xl, shadow-md
+                    'max-w-[80%] rounded-2xl p-3.5 text-sm shadow-lg transition-all duration-300 ease-in-out hover:shadow-xl hover:scale-[1.02]', // Increased rounding, padding, shadow, added hover effect
                     message.sender === 'user'
-                      ? 'bg-primary text-primary-foreground rounded-br-none' // More distinct user bubble
-                      : 'bg-muted text-muted-foreground rounded-bl-none dark:bg-neutral-700 dark:text-neutral-100' // More distinct AI bubble
+                      ? 'bg-primary text-primary-foreground rounded-br-lg' 
+                      : 'bg-muted text-muted-foreground rounded-bl-lg dark:bg-neutral-700 dark:text-neutral-100'
                   )}
                 >
                   {typeof message.text === 'string' ? (
-                     <p className="whitespace-pre-wrap">{message.text}</p>
+                     <p className="whitespace-pre-wrap leading-relaxed">{message.text}</p> /* Added leading-relaxed */
                   ) : (
                     message.text
                   )}
                 </div>
                  {message.sender === 'user' && (
-                  <Avatar className="h-8 w-8 border shadow-sm">
-                     <AvatarFallback><User className="h-4 w-4" /></AvatarFallback>
+                  <Avatar className="h-9 w-9 border shadow-md"> {/* Enhanced User avatar */}
+                     <AvatarFallback><User className="h-5 w-5" /></AvatarFallback>
                   </Avatar>
                 )}
               </div>
             ))}
-            {isLoading && (
+            {isLoading && messages.length > 0 && messages[messages.length-1].text && typeof messages[messages.length-1].text !== 'string' && (
+              // This ensures the loading skeleton for "thinking" is removed once a real message (even an error) replaces it.
+              // The actual thinking message is handled by the specific logic in handleSendMessage.
+              // This is a fallback / visual cue if the last message IS the loading dots.
               <div className="flex items-start gap-3 justify-start animate-fadeIn">
-                <Avatar className="h-8 w-8 border">
-                    <AvatarFallback><Bot className="h-4 w-4 animate-pulse text-primary" /></AvatarFallback>
+                <Avatar className="h-9 w-9 border-2 border-primary/50 shadow-md">
+                    <AvatarFallback className="bg-primary/10 "><Bot className="h-5 w-5 animate-pulse text-primary" /></AvatarFallback>
                 </Avatar>
-                <div className="bg-muted dark:bg-neutral-700 rounded-xl p-3 shadow-md">
+                <div className="bg-muted dark:bg-neutral-700 rounded-2xl p-3.5 shadow-lg">
                     <Skeleton className="h-4 w-24 bg-muted-foreground/20 dark:bg-neutral-600" />
                 </div>
               </div>
@@ -148,19 +167,19 @@ export function AiChat() {
           </div>
         </ScrollArea>
       </CardContent>
-      <CardFooter className="p-4 border-t bg-card/80 backdrop-blur-sm">
-        <form onSubmit={handleSendMessage} className="flex w-full items-center space-x-2">
+      <CardFooter className="p-4 border-t bg-card/80 backdrop-blur-md"> {/* Slightly more blur */}
+        <form onSubmit={handleSendMessage} className="flex w-full items-center space-x-3"> {/* Increased space */}
           <Input
             ref={inputRef}
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
-            placeholder="Ask the AI about your tasks..."
+            placeholder="Ask Jack about your tasks..."
             disabled={isLoading}
-            className="flex-1 transition-shadow duration-200 focus:shadow-md"
+            className="flex-1 h-11 text-base transition-shadow duration-200 focus:shadow-xl focus:border-primary/50 rounded-lg" /* Taller input, larger text, stronger focus */
             autoComplete="off"
           />
-          <Button type="submit" size="icon" disabled={isLoading || !inputValue.trim()} className="transition-transform active:scale-90">
-            <Send className="h-4 w-4" />
+          <Button type="submit" size="lg" disabled={isLoading || !inputValue.trim()} className="transition-all duration-150 ease-in-out hover:bg-primary/90 active:scale-95 shadow-md hover:shadow-lg"> {/* Larger button, more pronounced effects */}
+            <Send className="h-5 w-5" />
             <span className="sr-only">Send message</span>
           </Button>
         </form>
@@ -168,3 +187,4 @@ export function AiChat() {
     </Card>
   );
 }
+
