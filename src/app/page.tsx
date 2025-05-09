@@ -20,7 +20,7 @@ import { AiChat } from "@/components/ai-chat";
 import { SettingsView } from '@/components/settings-view';
 import { PrioritizeTasksView } from '@/components/prioritize-tasks-view';
 import { SmartTaskCreationView } from '@/components/smart-task-creation-view';
-import { Bot, CheckSquare, ListTodo, Settings, Star, Menu, FolderKanban, PlusCircle, Edit3, Trash2, Palette, LogOut } from "lucide-react";
+import { Bot, CheckSquare, ListTodo, Settings, Star, Menu, FolderKanban, PlusCircle, Edit3, Trash2, Palette, LogOut, Database, Zap } from "lucide-react";
 import { useSidebar } from '@/components/ui/sidebar';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -58,7 +58,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 type ActiveView = 'board' | 'ai-assistant' | 'prioritize' | 'smart-create' | 'settings';
 
 export default function Home() {
-  const { currentUser, loading: authLoading, logout } = useAuth();
+  const { currentUser, loading: authLoading, logout, currentProvider } = useAuth();
   const router = useRouter();
   const [activeView, setActiveView] = useState<ActiveView>('board');
   const { isMobile } = useSidebar();
@@ -80,10 +80,10 @@ export default function Home() {
 
   // Effect to ensure an active board is selected if possible
   useEffect(() => {
-    if (!activeBoardId && boards.length > 0) {
+    if (currentUser && !activeBoardId && boards.length > 0) { // Ensure currentUser exists before trying to set active board
       setActiveBoardId(boards[0].id);
     }
-  }, [activeBoardId, boards, setActiveBoardId]);
+  }, [activeBoardId, boards, setActiveBoardId, currentUser]);
 
 
   if (authLoading || !currentUser) {
@@ -135,6 +135,16 @@ export default function Home() {
       return currentUser.email.charAt(0).toUpperCase();
     }
     return "U";
+  }
+  
+  const getProviderIcon = () => {
+    if (currentProvider === 'firebase') {
+      return <Database className="h-3 w-3 text-orange-500" title="Firebase" />;
+    }
+    if (currentProvider === 'supabase') {
+      return <Zap className="h-3 w-3 text-green-500" title="Supabase" />;
+    }
+    return null;
   }
 
 
@@ -306,18 +316,23 @@ export default function Home() {
                   Logout
                 </SidebarMenuButton>
               </SidebarMenuItem>
-              <div className="p-2 mt-2 group-data-[collapsible=icon]:hidden">
-                <div className="flex items-center gap-2">
-                  <Avatar className="h-9 w-9">
-                    {currentUser.photoURL ? <AvatarImage src={currentUser.photoURL} alt={currentUser.displayName || "User"} /> : null}
-                    <AvatarFallback className="bg-primary text-primary-foreground">{getUserInitial()}</AvatarFallback>
-                  </Avatar>
-                  <div>
-                    <p className="text-sm font-medium text-sidebar-foreground">{currentUser.displayName || currentUser.email?.split('@')[0]}</p>
-                    <p className="text-xs text-muted-foreground">{currentUser.email}</p>
+              {currentUser && (
+                <div className="p-2 mt-2 group-data-[collapsible=icon]:hidden">
+                  <div className="flex items-center gap-2">
+                    <Avatar className="h-9 w-9">
+                      {currentUser.photoURL ? <AvatarImage src={currentUser.photoURL} alt={currentUser.displayName || "User"} /> : null}
+                      <AvatarFallback className="bg-primary text-primary-foreground">{getUserInitial()}</AvatarFallback>
+                    </Avatar>
+                    <div>
+                      <p className="text-sm font-medium text-sidebar-foreground flex items-center gap-1">
+                        {currentUser.displayName || currentUser.email?.split('@')[0]}
+                        {getProviderIcon()}
+                      </p>
+                      <p className="text-xs text-muted-foreground">{currentUser.email}</p>
+                    </div>
                   </div>
                 </div>
-              </div>
+              )}
            </SidebarMenu>
         </SidebarFooter>
       </Sidebar>
@@ -350,4 +365,3 @@ export default function Home() {
     </div>
   );
 }
-

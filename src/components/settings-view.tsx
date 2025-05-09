@@ -4,7 +4,7 @@
 import React from 'react';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useSettings, type InteractionStyle } from '@/contexts/SettingsContext';
-import { useAuth } from '@/contexts/AuthContext'; // Import useAuth
+import { useAuth } from '@/contexts/AuthContext'; 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import {
@@ -15,9 +15,9 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
-import { Button } from '@/components/ui/button'; // Import Button
-import { Moon, Sun, Laptop, Zap, MessageCircle, LogOut, UserCircle } from 'lucide-react';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'; // Import Avatar components
+import { Button } from '@/components/ui/button';
+import { Moon, Sun, Laptop, Zap, MessageCircle, LogOut, UserCircle, Database } from 'lucide-react'; // Added Database
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'; 
 import { cn } from '@/lib/utils';
 
 const interactionStyleOptions: { value: InteractionStyle; label: string; description: string }[] = [
@@ -30,7 +30,7 @@ const interactionStyleOptions: { value: InteractionStyle; label: string; descrip
 export function SettingsView() {
   const { theme, setTheme } = useTheme();
   const { isBetaModeEnabled, setIsBetaModeEnabled, interactionStyle, setInteractionStyle } = useSettings();
-  const { currentUser, logout, loading: authLoading } = useAuth(); // Get currentUser and logout function
+  const { currentUser, logout, loading: authLoading, currentProvider } = useAuth(); 
 
   const getUserInitial = () => {
     if (currentUser?.displayName) {
@@ -41,6 +41,16 @@ export function SettingsView() {
     }
     return <UserCircle className="h-5 w-5"/>;
   }
+  
+  const getProviderIcon = () => {
+    if (currentProvider === 'firebase') {
+      return <Database className="h-4 w-4 text-orange-500" title="Firebase" />;
+    }
+    if (currentProvider === 'supabase') {
+      return <Zap className="h-4 w-4 text-green-500" title="Supabase" />;
+    }
+    return null;
+  }
 
 
   return (
@@ -50,7 +60,6 @@ export function SettingsView() {
         <CardDescription>Manage your preferences and application settings.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
-        {/* User Information Section */}
         {currentUser && (
           <div className="p-4 border rounded-lg shadow-sm hover:shadow-md transition-shadow duration-200">
             <Label className="text-base font-medium flex items-center gap-2 mb-3">
@@ -62,7 +71,10 @@ export function SettingsView() {
                 <AvatarFallback className="bg-primary text-primary-foreground text-lg">{getUserInitial()}</AvatarFallback>
               </Avatar>
               <div>
-                <p className="text-sm font-semibold">{currentUser.displayName || 'User'}</p>
+                <p className="text-sm font-semibold flex items-center gap-1.5">
+                  {currentUser.displayName || 'User'}
+                  {getProviderIcon()}
+                </p>
                 <p className="text-xs text-muted-foreground">{currentUser.email}</p>
               </div>
             </div>
@@ -78,7 +90,6 @@ export function SettingsView() {
           </div>
         )}
 
-        {/* Theme Setting */}
         <div className="flex items-center justify-between p-4 border rounded-lg shadow-sm hover:shadow-md transition-shadow duration-200">
           <div className="space-y-0.5">
             <Label htmlFor="theme-select" className="text-base font-medium">
@@ -115,7 +126,6 @@ export function SettingsView() {
           </Select>
         </div>
 
-        {/* AI Interaction Style Setting */}
         <div className="flex items-center justify-between p-4 border rounded-lg shadow-sm hover:shadow-md transition-shadow duration-200">
           <div className="space-y-0.5">
             <Label htmlFor="interaction-style-select" className="text-base font-medium flex items-center gap-2">
@@ -139,8 +149,6 @@ export function SettingsView() {
           </Select>
         </div>
 
-
-        {/* Beta Mode Setting */}
         <div className="flex items-center justify-between p-4 border rounded-lg shadow-sm hover:shadow-md transition-shadow duration-200">
           <div className="space-y-0.5">
             <Label htmlFor="beta-mode-switch" className="text-base font-medium flex items-center gap-2">
