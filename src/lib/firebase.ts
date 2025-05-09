@@ -13,8 +13,26 @@ const firebaseConfig = {
 };
 
 let app: FirebaseApp;
+
+if (!firebaseConfig.apiKey || !firebaseConfig.authDomain || !firebaseConfig.projectId) {
+  console.warn(
+    "Firebase configuration is missing or incomplete. " +
+    "Please ensure all NEXT_PUBLIC_FIREBASE_ environment variables are set correctly in your .env.local file. " +
+    "This may lead to authentication errors (e.g., auth/api-key-not-valid)."
+  );
+}
+
+
 if (!getApps().length) {
-  app = initializeApp(firebaseConfig);
+  try {
+    app = initializeApp(firebaseConfig);
+  } catch (error) {
+    console.error("Firebase initialization error:", error);
+    // Fallback or further error handling if necessary
+    // For now, we'll let it throw if essential config is missing and causes `initializeApp` to fail.
+    // The warning above should guide the user.
+    throw error; 
+  }
 } else {
   app = getApps()[0];
 }
