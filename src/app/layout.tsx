@@ -5,9 +5,10 @@ import { Inter } from 'next/font/google'; // Import Inter
 import './globals.css';
 import { Toaster } from "@/components/ui/toaster";
 import { SidebarProvider } from "@/components/ui/sidebar";
-import { ThemeProvider } from '@/contexts/ThemeContext'; // Import ThemeProvider
-import { TaskProvider } from '@/contexts/TaskContext'; // Import TaskProvider
-import { SettingsProvider } from '@/contexts/SettingsContext'; // Import SettingsProvider
+import { ThemeProvider } from '@/contexts/ThemeContext'; 
+import { TaskProvider } from '@/contexts/TaskContext'; 
+import { SettingsProvider } from '@/contexts/SettingsContext';
+import { AuthProvider } from '@/contexts/AuthContext'; // Import AuthProvider
 
 const geistSans = Geist({
   variable: '--font-geist-sans',
@@ -43,14 +44,16 @@ export default function RootLayout({
           defaultTheme="system"
           storageKey="taskzenith-theme"
         >
-          <SettingsProvider> {/* Wrap with SettingsProvider */}
-            <TaskProvider> {/* Wrap with TaskProvider */}
-              <SidebarProvider defaultOpen={true}>
-                {children}
-              </SidebarProvider>
-              <Toaster />
-            </TaskProvider>
-          </SettingsProvider>
+          <AuthProvider> {/* Wrap with AuthProvider */}
+            <SettingsProvider> 
+              <TaskProvider> 
+                <SidebarProvider defaultOpen={true}>
+                  {children}
+                </SidebarProvider>
+                <Toaster />
+              </TaskProvider>
+            </SettingsProvider>
+          </AuthProvider>
         </ThemeProvider>
       </body>
     </html>

@@ -4,7 +4,8 @@
 import React from 'react';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useSettings, type InteractionStyle } from '@/contexts/SettingsContext';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { useAuth } from '@/contexts/AuthContext'; // Import useAuth
+import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import {
   Select,
@@ -14,7 +15,9 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
-import { Moon, Sun, Laptop, Zap, MessageCircle } from 'lucide-react';
+import { Button } from '@/components/ui/button'; // Import Button
+import { Moon, Sun, Laptop, Zap, MessageCircle, LogOut, UserCircle } from 'lucide-react';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'; // Import Avatar components
 import { cn } from '@/lib/utils';
 
 const interactionStyleOptions: { value: InteractionStyle; label: string; description: string }[] = [
@@ -27,13 +30,54 @@ const interactionStyleOptions: { value: InteractionStyle; label: string; descrip
 export function SettingsView() {
   const { theme, setTheme } = useTheme();
   const { isBetaModeEnabled, setIsBetaModeEnabled, interactionStyle, setInteractionStyle } = useSettings();
+  const { currentUser, logout, loading: authLoading } = useAuth(); // Get currentUser and logout function
+
+  const getUserInitial = () => {
+    if (currentUser?.displayName) {
+      return currentUser.displayName.charAt(0).toUpperCase();
+    }
+    if (currentUser?.email) {
+      return currentUser.email.charAt(0).toUpperCase();
+    }
+    return <UserCircle className="h-5 w-5"/>;
+  }
+
 
   return (
     <Card className="max-w-2xl mx-auto shadow-xl interactive-card-hover">
       <CardHeader>
         <CardTitle>Application Settings</CardTitle>
+        <CardDescription>Manage your preferences and application settings.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
+        {/* User Information Section */}
+        {currentUser && (
+          <div className="p-4 border rounded-lg shadow-sm hover:shadow-md transition-shadow duration-200">
+            <Label className="text-base font-medium flex items-center gap-2 mb-3">
+                <UserCircle className="h-5 w-5 text-primary" /> Account Information
+            </Label>
+            <div className="flex items-center space-x-3">
+              <Avatar className="h-12 w-12">
+                 {currentUser.photoURL ? <AvatarImage src={currentUser.photoURL} alt={currentUser.displayName || "User"} /> : null}
+                <AvatarFallback className="bg-primary text-primary-foreground text-lg">{getUserInitial()}</AvatarFallback>
+              </Avatar>
+              <div>
+                <p className="text-sm font-semibold">{currentUser.displayName || 'User'}</p>
+                <p className="text-xs text-muted-foreground">{currentUser.email}</p>
+              </div>
+            </div>
+            <Button 
+                variant="outline" 
+                onClick={logout} 
+                disabled={authLoading} 
+                className="w-full mt-4"
+            >
+              <LogOut className="mr-2 h-4 w-4" />
+              {authLoading ? 'Logging out...' : 'Log Out'}
+            </Button>
+          </div>
+        )}
+
         {/* Theme Setting */}
         <div className="flex items-center justify-between p-4 border rounded-lg shadow-sm hover:shadow-md transition-shadow duration-200">
           <div className="space-y-0.5">
@@ -113,16 +157,15 @@ export function SettingsView() {
             aria-label="Toggle beta features"
           />
         </div>
-
-         <div className="p-4 border rounded-lg shadow-sm hover:shadow-md transition-shadow duration-200">
-            <h3 className="text-lg font-medium mb-2">About TaskZenith</h3>
-            <p className="text-sm text-muted-foreground">
-                TaskZenith is an AI-powered task management application designed to help you stay organized and productive.
-                Leverage smart features like AI task prioritization, intelligent task creation, and an AI assistant to streamline your workflow.
-            </p>
-            <p className="text-xs text-muted-foreground mt-4">Version 1.0.0</p>
-        </div>
       </CardContent>
+      <CardFooter>
+         <div className="w-full p-4 border-t rounded-b-lg text-center">
+            <h3 className="text-base font-medium mb-1">About TaskZenith</h3>
+            <p className="text-xs text-muted-foreground">
+                Version 1.0.0 | AI-Powered Productivity
+            </p>
+        </div>
+      </CardFooter>
     </Card>
   );
 }

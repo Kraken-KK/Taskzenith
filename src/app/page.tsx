@@ -2,6 +2,8 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { useAuth } from '@/contexts/AuthContext';
 import {
   Sidebar,
   SidebarContent,
@@ -18,9 +20,9 @@ import { AiChat } from "@/components/ai-chat";
 import { SettingsView } from '@/components/settings-view';
 import { PrioritizeTasksView } from '@/components/prioritize-tasks-view';
 import { SmartTaskCreationView } from '@/components/smart-task-creation-view';
-import { Bot, CheckSquare, ListTodo, Settings, Star, Menu, FolderKanban, PlusCircle, Edit3, Trash2, Palette } from "lucide-react";
+import { Bot, CheckSquare, ListTodo, Settings, Star, Menu, FolderKanban, PlusCircle, Edit3, Trash2, Palette, LogOut } from "lucide-react";
 import { useSidebar } from '@/components/ui/sidebar';
-import { Button, buttonVariants } from '@/components/ui/button'; // Import buttonVariants
+import { Button, buttonVariants } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useTasks } from '@/contexts/TaskContext';
 import type { Board } from '@/types';
@@ -48,14 +50,16 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { useToast } from '@/hooks/use-toast';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 
 
 type ActiveView = 'board' | 'ai-assistant' | 'prioritize' | 'smart-create' | 'settings';
 
 export default function Home() {
+  const { currentUser, loading: authLoading, logout } = useAuth();
+  const router = useRouter();
   const [activeView, setActiveView] = useState<ActiveView>('board');
   const { isMobile } = useSidebar();
   const { boards, activeBoardId, setActiveBoardId, getActiveBoard, deleteBoard } = useTasks();
@@ -67,6 +71,31 @@ export default function Home() {
   const [isThemeCustomizerOpen, setIsThemeCustomizerOpen] = useState(false);
   const [boardToCustomize, setBoardToCustomize] = useState<Board | undefined>(undefined);
 
+
+  useEffect(() => {
+    if (!authLoading && !currentUser) {
+      router.push('/login');
+    }
+  }, [currentUser, authLoading, router]);
+
+  // Effect to ensure an active board is selected if possible
+  useEffect(() => {
+    if (!activeBoardId && boards.length > 0) {
+      setActiveBoardId(boards[0].id);
+    }
+  }, [activeBoardId, boards, setActiveBoardId]);
+
+
+  if (authLoading || !currentUser) {
+    return (
+      <div className="flex h-screen w-screen items-center justify-center bg-background">
+        <svg className="animate-spin h-12 w-12 text-primary" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
+      </div>
+    );
+  }
 
   const getHeaderText = () => {
     const activeBoard = getActiveBoard();
@@ -98,12 +127,15 @@ export default function Home() {
     setIsThemeCustomizerOpen(true);
   }
 
-  // Effect to ensure an active board is selected if possible
-  useEffect(() => {
-    if (!activeBoardId && boards.length > 0) {
-      setActiveBoardId(boards[0].id);
+  const getUserInitial = () => {
+    if (currentUser?.displayName) {
+      return currentUser.displayName.charAt(0).toUpperCase();
     }
-  }, [activeBoardId, boards, setActiveBoardId]);
+    if (currentUser?.email) {
+      return currentUser.email.charAt(0).toUpperCase();
+    }
+    return "U";
+  }
 
 
   return (
@@ -264,6 +296,28 @@ export default function Home() {
                   Settings
                 </SidebarMenuButton>
              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  tooltip="Logout"
+                  onClick={logout}
+                  className="hover:bg-destructive/20 dark:hover:bg-destructive/30 text-destructive dark:text-red-400"
+                >
+                  <LogOut />
+                  Logout
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <div className="p-2 mt-2 group-data-[collapsible=icon]:hidden">
+                <div className="flex items-center gap-2">
+                  <Avatar className="h-9 w-9">
+                    {currentUser.photoURL ? <AvatarImage src={currentUser.photoURL} alt={currentUser.displayName || "User"} /> : null}
+                    <AvatarFallback className="bg-primary text-primary-foreground">{getUserInitial()}</AvatarFallback>
+                  </Avatar>
+                  <div>
+                    <p className="text-sm font-medium text-sidebar-foreground">{currentUser.displayName || currentUser.email?.split('@')[0]}</p>
+                    <p className="text-xs text-muted-foreground">{currentUser.email}</p>
+                  </div>
+                </div>
+              </div>
            </SidebarMenu>
         </SidebarFooter>
       </Sidebar>
@@ -271,7 +325,7 @@ export default function Home() {
         <header className="flex items-center justify-between p-4 border-b shadow-sm bg-card/50 backdrop-blur-sm">
            <SidebarTrigger />
            <h1 className="text-xl font-semibold">{getHeaderText()}</h1>
-           <div className="w-7 h-7"></div>
+           <div className="w-7 h-7"> {/* Placeholder for potential right-side header actions */} </div>
          </header>
         <main className="flex-1 overflow-y-auto p-4 bg-secondary/20 dark:bg-neutral-900/50">
           {activeView === 'board' && (activeBoardId ? <KanbanBoard /> : 
