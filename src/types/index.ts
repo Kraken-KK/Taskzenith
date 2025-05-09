@@ -9,10 +9,10 @@ export interface ChecklistItem {
 
 // Define board theme customization options
 export interface BoardTheme {
-  primaryColor?: string; // Example: HSL string for primary actions, highlights
-  backgroundColor?: string; // Example: HSL string for board background
-  columnHeaderColor?: string; // Example: HSL string for column headers
-  cardColor?: string; // Example: HSL string for task cards
+  primaryColor?: string; // HEX string, e.g., "#RRGGBB"
+  backgroundColor?: string; // HEX string
+  columnHeaderColor?: string; // HEX string
+  cardColor?: string; // HEX string
 }
 
 // Define the structure of a task

@@ -14,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Plus, Edit2, Trash2, Check, X, AlertTriangle, ListChecks, Filter, ArrowUpDown, Link2, MoreHorizontal, PlusCircle, CalendarDays, Tags, UserCircle, Palette, FolderKanban } from 'lucide-react';
 import Confetti from 'react-confetti';
 import { useToast } from "@/hooks/use-toast";
-import type { Task, Column as ColumnType, ChecklistItem, BoardTheme } from '@/types';
+import type { Task, Column as ColumnType, ChecklistItem } from '@/types';
 import { AddTaskDialog } from '@/components/add-task-dialog';
 import { useTasks } from '@/contexts/TaskContext';
 import { useSettings } from '@/contexts/SettingsContext';
@@ -65,15 +65,14 @@ interface TaskCardProps {
   onDeleteChecklistItem: (taskId: string, columnId: string, itemId: string) => void;
   onUpdateChecklistItemText: (taskId: string, columnId: string, itemId: string, newText: string) => void;
   isBetaModeEnabled: boolean;
-  getTaskById: (taskId: string) => Task | undefined; // From active board
-  dragOverColumnId: string | null; // Renamed for clarity
-  cardStyle?: React.CSSProperties;
+  getTaskById: (taskId: string) => Task | undefined;
+  dragOverColumnId: string | null;
 }
 
 function TaskCard({ 
   task, columnId, onDragStart, onDragEnd, onUpdateTask, onDeleteTask, 
   onAddChecklistItem, onToggleChecklistItem, onDeleteChecklistItem, onUpdateChecklistItemText, 
-  isBetaModeEnabled, getTaskById, dragOverColumnId, cardStyle
+  isBetaModeEnabled, getTaskById, dragOverColumnId
 }: TaskCardProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editedContent, setEditedContent] = useState(task.content);
@@ -130,10 +129,9 @@ function TaskCard({
       onDragStart={(e) => onDragStart(e, task)}
       onDragEnd={onDragEnd}
       className={cn(
-        "mb-3 p-3 shadow-md hover:shadow-lg transition-shadow duration-200 ease-in-out interactive-card-hover relative",
-        dragOverColumnId === columnId && "border-primary border-2"
+        "mb-3 p-3 shadow-md hover:shadow-lg transition-shadow duration-200 ease-in-out interactive-card-hover relative bg-[var(--board-card-color,hsl(var(--card)))] text-[var(--board-card-foreground-color,hsl(var(--card-foreground)))]",
+        // dragOverColumnId === columnId && "border-[var(--board-primary-color,hsl(var(--primary)))] border-2" // This is handled by ring on column
       )}
-      style={cardStyle} // Apply dynamic card style
     >
       <CardContent className="p-0 space-y-2">
         <div className="flex justify-between items-start">
@@ -186,7 +184,7 @@ function TaskCard({
                 return (
                   <Tooltip key={depId}>
                     <TooltipTrigger asChild>
-                      <Badge variant="outline" className="text-xs border-dashed border-primary/50 text-primary/80 py-0.5 px-1.5">
+                      <Badge variant="outline" className="text-xs border-dashed border-[var(--board-primary-color,hsl(var(--primary)))]/50 text-[var(--board-primary-color,hsl(var(--primary)))]/80 py-0.5 px-1.5">
                         <Link2 className="h-3 w-3 mr-1"/>
                         {depTask ? depTask.content.substring(0,15) + (depTask.content.length > 15 ? '...' : '') : depId.substring(0,5)}
                       </Badge>
@@ -206,7 +204,7 @@ function TaskCard({
             <Label className="text-xs font-medium flex items-center text-muted-foreground">
               <ListChecks className="h-3.5 w-3.5 mr-1.5" /> Checklist ({completedChecklistItems}/{totalChecklistItems})
             </Label>
-            <Progress value={checklistProgress} className="h-1.5" />
+            <Progress value={checklistProgress} className="h-1.5 [&>div]:bg-[var(--board-primary-color,hsl(var(--primary)))]" />
             <ul className="space-y-1 max-h-24 overflow-y-auto pr-1">
               {task.checklist.map(item => (
                 <li key={item.id} className="flex items-center group text-xs">
@@ -214,7 +212,7 @@ function TaskCard({
                     id={`${task.id}-${item.id}`}
                     checked={item.completed}
                     onCheckedChange={() => onToggleChecklistItem(task.id, columnId, item.id)}
-                    className="mr-2 h-3.5 w-3.5"
+                    className="mr-2 h-3.5 w-3.5 border-[var(--board-primary-color,hsl(var(--primary)))] data-[state=checked]:bg-[var(--board-primary-color,hsl(var(--primary)))] data-[state=checked]:text-primary-foreground"
                   />
                   {editingChecklistItemId === item.id ? (
                      <Input 
@@ -310,7 +308,6 @@ export function KanbanBoard() {
     getActiveBoard, addTask, moveTask, deleteTask, updateTask, 
     addColumn, updateColumnTitle, deleteColumn, updateColumnWipLimit, 
     addChecklistItem, toggleChecklistItem, deleteChecklistItem, updateChecklistItemText, getTaskById,
-    updateBoardTheme, // Added for theme customization
   } = useTasks();
   
   const activeBoard = getActiveBoard();
@@ -320,7 +317,7 @@ export function KanbanBoard() {
   const { toast } = useToast();
   const [isAddTaskDialogOpen, setIsAddTaskDialogOpen] = useState(false);
   const [draggedTask, setDraggedTask] = useState<Task | null>(null);
-  const [dragOverColumnId, setDragOverColumnId] = useState<string | null>(null); // Renamed
+  const [dragOverColumnId, setDragOverColumnId] = useState<string | null>(null);
   const [newColumnTitle, setNewColumnTitle] = useState('');
   const [editingColumnId, setEditingColumnId] = useState<string | null>(null);
   const [currentEditingColumnTitle, setCurrentEditingColumnTitle] = useState('');
@@ -331,24 +328,17 @@ export function KanbanBoard() {
   const [tagFilter, setTagFilter] = useState<string>('');
   const [columnSortOptions, setColumnSortOptions] = useState<Record<string, SortOption>>({});
 
-  const boardStyle = useMemo(() => {
+  const boardInlineStyles = useMemo(() => {
     const theme = activeBoard?.theme;
-    if (!theme) return {};
-    const style: React.CSSProperties = {};
-    if (theme.backgroundColor) style['--board-background-color' as any] = theme.backgroundColor;
-    // Add other theme properties to CSS variables if needed
-    return style;
+    const styles: React.CSSProperties = {};
+    if (theme?.backgroundColor) styles['--board-background-color' as any] = theme.backgroundColor;
+    if (theme?.primaryColor) styles['--board-primary-color' as any] = theme.primaryColor;
+    if (theme?.columnHeaderColor) styles['--board-column-header-color' as any] = theme.columnHeaderColor;
+    if (theme?.cardColor) styles['--board-card-color' as any] = theme.cardColor;
+    // Potentially add --board-card-foreground-color if needed for text contrast on custom card colors
+    // For now, card text color will be default or determined by dark/light mode.
+    return styles;
   }, [activeBoard?.theme]);
-
-  const columnHeaderStyle = useMemo(() => (color?: string) => {
-    if (!color) return {};
-    return { backgroundColor: color };
-  }, []);
-
-  const cardStyle = useMemo(() => (color?: string) => {
-    if (!color) return {};
-    return { backgroundColor: color };
-  }, []);
 
 
   useEffect(() => {
@@ -501,13 +491,19 @@ export function KanbanBoard() {
   }
 
   return (
-    <div className="p-4 space-y-6 animate-fadeInUp" style={{ backgroundColor: activeBoard.theme?.backgroundColor || 'var(--background)' }}>
+    <div 
+      className="p-4 space-y-6 animate-fadeInUp bg-[var(--board-background-color,hsl(var(--background)))] text-[var(--board-foreground-color,hsl(var(--foreground)))]" 
+      style={boardInlineStyles}
+    >
       {showConfetti && windowSize.width > 0 && windowSize.height > 0 && (
         <Confetti width={windowSize.width} height={windowSize.height} recycle={false} numberOfPieces={500} gravity={0.15} tweenDuration={7000}/>
       )}
       <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
         <AddTaskDialog open={isAddTaskDialogOpen} onOpenChange={setIsAddTaskDialogOpen} onAddTask={handleAddTaskLocal}>
-          <Button onClick={() => setIsAddTaskDialogOpen(true)} className="shadow-md hover:shadow-lg transition-shadow">
+          <Button 
+            onClick={() => setIsAddTaskDialogOpen(true)} 
+            className="shadow-md hover:shadow-lg transition-shadow bg-[var(--board-primary-color,hsl(var(--primary)))] text-[var(--board-primary-foreground-color,hsl(var(--primary-foreground)))] hover:bg-[var(--board-primary-color,hsl(var(--primary)))]/90"
+          >
             <Plus className="mr-2 h-4 w-4" /> Add Task
           </Button>
         </AddTaskDialog>
@@ -556,23 +552,25 @@ export function KanbanBoard() {
       </div>
 
       <ScrollArea className="w-full pb-4">
-         <div className="flex gap-4 items-start" style={boardStyle}>
+         <div className="flex gap-4 items-start">
           {activeBoard.columns.map(column => {
             const displayTasks = sortedAndFilteredTasks(column.tasks, column.id);
             const wipLimitExceeded = column.wipLimit && column.tasks.length > column.wipLimit;
-            const currentColumnHeaderStyle = columnHeaderStyle(activeBoard.theme?.columnHeaderColor);
-
+            
             return (
               <div
                 key={column.id}
                 onDragOver={(e) => handleDragOver(e, column.id)}
                 onDrop={(e) => handleDrop(e, column.id)}
                 onDragLeave={handleDragLeave}
-                className={cn("min-w-[300px] max-w-[350px] flex-shrink-0 bg-muted/30 dark:bg-neutral-800/50 rounded-lg shadow-lg transition-all duration-300 ease-in-out", dragOverColumnId === column.id && "ring-2 ring-primary ring-offset-2 dark:ring-offset-neutral-900", wipLimitExceeded && "border-2 border-destructive/70" )}
+                className={cn(
+                  "min-w-[300px] max-w-[350px] flex-shrink-0 bg-muted/30 dark:bg-neutral-800/50 rounded-lg shadow-lg transition-all duration-300 ease-in-out", 
+                  dragOverColumnId === column.id && "ring-2 ring-offset-2 dark:ring-offset-neutral-900 ring-[var(--board-primary-color,hsl(var(--primary)))]", 
+                  wipLimitExceeded && "border-2 border-destructive/70" 
+                )}
               >
                 <CardHeader 
-                    className="p-3 border-b border-border/70 dark:border-neutral-700/70 flex flex-row justify-between items-center sticky top-0 bg-muted/50 dark:bg-neutral-800/70 backdrop-blur-sm z-10 rounded-t-lg"
-                    style={currentColumnHeaderStyle}
+                    className="p-3 border-b border-border/70 dark:border-neutral-700/70 flex flex-row justify-between items-center sticky top-0 backdrop-blur-sm z-10 rounded-t-lg bg-[var(--board-column-header-color,hsl(var(--muted)))] text-[var(--board-column-header-foreground-color,hsl(var(--muted-foreground)))]"
                 >
                   {editingColumnId === column.id ? (
                      <Input 
@@ -682,9 +680,8 @@ export function KanbanBoard() {
                         onDeleteChecklistItem={deleteChecklistItem}
                         onUpdateChecklistItemText={updateChecklistItemText}
                         isBetaModeEnabled={isBetaModeEnabled}
-                        getTaskById={getTaskById} // Pass the context's getTaskById
+                        getTaskById={getTaskById}
                         dragOverColumnId={dragOverColumnId}
-                        cardStyle={cardStyle(activeBoard.theme?.cardColor)}
                       />
                     </AlertDialog>
                   ))}
@@ -695,7 +692,7 @@ export function KanbanBoard() {
           })}
            {isBetaModeEnabled && (
             <div className="min-w-[300px] flex-shrink-0 p-2">
-              <Card className="bg-transparent border-dashed border-2 hover:border-primary/70 transition-colors duration-200">
+              <Card className="bg-transparent border-dashed border-2 hover:border-[var(--board-primary-color,hsl(var(--primary)))]/70 transition-colors duration-200">
                 <CardContent className="p-3 flex flex-col items-center justify-center h-full">
                     <Input 
                         value={newColumnTitle}
