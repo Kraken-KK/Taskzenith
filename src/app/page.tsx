@@ -1,6 +1,7 @@
+
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Sidebar,
   SidebarContent,
@@ -14,30 +15,96 @@ import {
 } from "@/components/ui/sidebar";
 import { KanbanBoard } from "@/components/kanban-board";
 import { AiChat } from "@/components/ai-chat";
-import { SettingsView } from '@/components/settings-view'; // Import SettingsView
-import { PrioritizeTasksView } from '@/components/prioritize-tasks-view'; // Import PrioritizeTasksView
-import { SmartTaskCreationView } from '@/components/smart-task-creation-view'; // Import SmartTaskCreationView
-import { Bot, CheckSquare, ListTodo, Settings, Star, Menu } from "lucide-react"; // Added Menu for SidebarTrigger in mobile
-import { useSidebar } from '@/components/ui/sidebar'; // To control sidebar visibility
-import { Button } from '@/components/ui/button'; // For a dedicated mobile trigger if needed
+import { SettingsView } from '@/components/settings-view';
+import { PrioritizeTasksView } from '@/components/prioritize-tasks-view';
+import { SmartTaskCreationView } from '@/components/smart-task-creation-view';
+import { Bot, CheckSquare, ListTodo, Settings, Star, Menu, FolderKanban, PlusCircle, Edit3, Trash2, Palette } from "lucide-react";
+import { useSidebar } from '@/components/ui/sidebar';
+import { Button, buttonVariants } from '@/components/ui/button'; // Import buttonVariants
 import { cn } from '@/lib/utils';
+import { useTasks } from '@/contexts/TaskContext';
+import type { Board } from '@/types';
+import { CreateBoardDialog } from '@/components/create-board-dialog';
+import { RenameBoardDialog } from '@/components/rename-board-dialog';
+import { BoardThemeCustomizer } from '@/components/board-theme-customizer';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+  DropdownMenuSub,
+  DropdownMenuSubTrigger,
+  DropdownMenuSubContent,
+  DropdownMenuPortal
+} from "@/components/ui/dropdown-menu";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { useToast } from '@/hooks/use-toast';
+
 
 type ActiveView = 'board' | 'ai-assistant' | 'prioritize' | 'smart-create' | 'settings';
 
 export default function Home() {
   const [activeView, setActiveView] = useState<ActiveView>('board');
-  const { isMobile } = useSidebar(); // Get mobile state
+  const { isMobile } = useSidebar();
+  const { boards, activeBoardId, setActiveBoardId, getActiveBoard, deleteBoard } = useTasks();
+  const { toast } = useToast();
+
+  const [isCreateBoardDialogOpen, setIsCreateBoardDialogOpen] = useState(false);
+  const [isRenameBoardDialogOpen, setIsRenameBoardDialogOpen] = useState(false);
+  const [boardToRename, setBoardToRename] = useState<Board | undefined>(undefined);
+  const [isThemeCustomizerOpen, setIsThemeCustomizerOpen] = useState(false);
+  const [boardToCustomize, setBoardToCustomize] = useState<Board | undefined>(undefined);
+
 
   const getHeaderText = () => {
+    const activeBoard = getActiveBoard();
     switch (activeView) {
-      case 'board': return 'Kanban Board';
-      case 'ai-assistant': return 'AI Assistant';
-      case 'prioritize': return 'Prioritize Tasks';
+      case 'board': return activeBoard ? activeBoard.name : 'Kanban Board';
+      case 'ai-assistant': return 'AI Assistant (Jack)';
+      case 'prioritize': return 'AI Task Prioritization';
       case 'smart-create': return 'Smart Task Creation';
       case 'settings': return 'Settings';
       default: return 'TaskZenith';
     }
   };
+  
+  const handleRenameBoard = (board: Board) => {
+    setBoardToRename(board);
+    setIsRenameBoardDialogOpen(true);
+  };
+
+  const handleDeleteBoard = (boardId: string, boardName: string) => {
+    deleteBoard(boardId);
+    toast({
+        title: "Board Deleted",
+        description: `Board "${boardName}" has been successfully deleted.`,
+    });
+  };
+
+  const handleCustomizeTheme = (board: Board) => {
+    setBoardToCustomize(board);
+    setIsThemeCustomizerOpen(true);
+  }
+
+  // Effect to ensure an active board is selected if possible
+  useEffect(() => {
+    if (!activeBoardId && boards.length > 0) {
+      setActiveBoardId(boards[0].id);
+    }
+  }, [activeBoardId, boards, setActiveBoardId]);
+
 
   return (
     <div className="flex h-screen bg-background text-foreground animate-fadeIn">
@@ -52,7 +119,7 @@ export default function Home() {
               strokeWidth="2"
               strokeLinecap="round"
               strokeLinejoin="round"
-              className="h-8 w-8 text-primary transition-transform duration-300 ease-in-out group-hover:scale-110" // Increased size and added hover effect
+              className="h-8 w-8 text-primary transition-transform duration-300 ease-in-out group-hover:scale-110"
             >
               <path d="M12 2L2 7l10 5 10-5-10-5z" />
               <path d="M2 17l10 5 10-5" />
@@ -63,11 +130,86 @@ export default function Home() {
         </SidebarHeader>
         <SidebarContent className="flex-1 overflow-y-auto p-2">
           <SidebarMenu>
+            {/* Board Management Dropdown */}
+            <SidebarMenuItem>
+                <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                        <SidebarMenuButton
+                            tooltip="My Boards"
+                            className="w-full hover:bg-sidebar-accent/80 dark:hover:bg-sidebar-accent/50"
+                        >
+                            <FolderKanban />
+                            My Boards
+                        </SidebarMenuButton>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent className="w-56 ml-2" side="right" align="start">
+                        <DropdownMenuLabel>Your Boards</DropdownMenuLabel>
+                        <DropdownMenuSeparator />
+                        {boards.map(board => (
+                           <AlertDialog key={board.id}> {/* Wrap DropdownMenuSub with AlertDialog for unique key context */}
+                            <DropdownMenuSub>
+                                <DropdownMenuSubTrigger
+                                    className={cn("justify-between", board.id === activeBoardId && "bg-accent text-accent-foreground")}
+                                    onClick={() => setActiveBoardId(board.id)}
+                                >
+                                    <span>{board.name}</span>
+                                </DropdownMenuSubTrigger>
+                                <DropdownMenuPortal>
+                                    <DropdownMenuSubContent>
+                                        <DropdownMenuItem onClick={() => handleRenameBoard(board)}>
+                                            <Edit3 className="mr-2 h-4 w-4" /> Rename
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => handleCustomizeTheme(board)}>
+                                            <Palette className="mr-2 h-4 w-4" /> Customize Theme
+                                        </DropdownMenuItem>
+                                        <DropdownMenuSeparator />
+                                        <AlertDialogTrigger asChild>
+                                            <DropdownMenuItem className="text-destructive focus:text-destructive focus:bg-destructive/10">
+                                                <Trash2 className="mr-2 h-4 w-4" /> Delete Board
+                                            </DropdownMenuItem>
+                                        </AlertDialogTrigger>
+                                        <AlertDialogContent>
+                                            <AlertDialogHeader>
+                                                <AlertDialogTitle>Delete Board &quot;{board.name}&quot;?</AlertDialogTitle>
+                                                <AlertDialogDescription>
+                                                This action cannot be undone. This will permanently delete the board and all its tasks.
+                                                </AlertDialogDescription>
+                                            </AlertDialogHeader>
+                                            <AlertDialogFooter>
+                                                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                                <AlertDialogAction
+                                                onClick={() => handleDeleteBoard(board.id, board.name)}
+                                                className={buttonVariants({ variant: "destructive" })}
+                                                >
+                                                Delete
+                                                </AlertDialogAction>
+                                            </AlertDialogFooter>
+                                        </AlertDialogContent>
+                                    </DropdownMenuSubContent>
+                                </DropdownMenuPortal>
+                            </DropdownMenuSub>
+                           </AlertDialog>
+                        ))}
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem onClick={() => setIsCreateBoardDialogOpen(true)}>
+                            <PlusCircle className="mr-2 h-4 w-4" /> Create New Board
+                        </DropdownMenuItem>
+                    </DropdownMenuContent>
+                </DropdownMenu>
+            </SidebarMenuItem>
+
              <SidebarMenuItem>
                <SidebarMenuButton
                   tooltip="Board"
                   isActive={activeView === 'board'}
-                  onClick={() => setActiveView('board')}
+                  onClick={() => {
+                    if (!activeBoardId && boards.length > 0) setActiveBoardId(boards[0].id);
+                    else if (!activeBoardId && boards.length === 0) {
+                         toast({title: "No Board Selected", description: "Please create or select a board first.", variant: "destructive"});
+                         return;
+                    }
+                    setActiveView('board');
+                  }}
                   className="hover:bg-sidebar-accent/80 dark:hover:bg-sidebar-accent/50"
                >
                   <ListTodo />
@@ -129,16 +271,29 @@ export default function Home() {
         <header className="flex items-center justify-between p-4 border-b shadow-sm bg-card/50 backdrop-blur-sm">
            <SidebarTrigger />
            <h1 className="text-xl font-semibold">{getHeaderText()}</h1>
-           <div className="w-7 h-7">{/* Placeholder for potential future header actions, keeps alignment */}</div>
+           <div className="w-7 h-7"></div>
          </header>
         <main className="flex-1 overflow-y-auto p-4 bg-secondary/20 dark:bg-neutral-900/50">
-          {activeView === 'board' && <KanbanBoard />}
+          {activeView === 'board' && (activeBoardId ? <KanbanBoard /> : 
+            <div className="flex flex-col items-center justify-center h-full text-center">
+                <FolderKanban className="w-24 h-24 text-muted-foreground mb-4" />
+                <h2 className="text-2xl font-semibold mb-2">No Board Selected</h2>
+                <p className="text-muted-foreground mb-4">Please create or select a board from the sidebar to get started.</p>
+                <Button onClick={() => setIsCreateBoardDialogOpen(true)}>
+                    <PlusCircle className="mr-2 h-4 w-4" /> Create Your First Board
+                </Button>
+            </div>
+          )}
           {activeView === 'ai-assistant' && <AiChat />}
           {activeView === 'prioritize' && <PrioritizeTasksView />}
           {activeView === 'smart-create' && <SmartTaskCreationView />}
           {activeView === 'settings' && <SettingsView />}
         </main>
       </SidebarInset>
+      <CreateBoardDialog open={isCreateBoardDialogOpen} onOpenChange={setIsCreateBoardDialogOpen} />
+      <RenameBoardDialog board={boardToRename} open={isRenameBoardDialogOpen} onOpenChange={setIsRenameBoardDialogOpen} />
+      <BoardThemeCustomizer board={boardToCustomize} open={isThemeCustomizerOpen} onOpenChange={setIsThemeCustomizerOpen} />
     </div>
   );
 }
+

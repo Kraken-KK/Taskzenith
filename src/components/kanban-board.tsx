@@ -1,9 +1,9 @@
 
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -11,10 +11,10 @@ import { Progress } from "@/components/ui/progress";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Plus, Edit2, Trash2, Check, X, GripVertical, AlertTriangle, ListChecks, Sparkles, Filter, ArrowUpDown, Link2, MoreHorizontal, PlusCircle, CalendarDays, Tags, UserCircle } from 'lucide-react';
+import { Plus, Edit2, Trash2, Check, X, AlertTriangle, ListChecks, Filter, ArrowUpDown, Link2, MoreHorizontal, PlusCircle, CalendarDays, Tags, UserCircle, Palette, FolderKanban } from 'lucide-react';
 import Confetti from 'react-confetti';
 import { useToast } from "@/hooks/use-toast";
-import type { Task, Column, ChecklistItem } from '@/types';
+import type { Task, Column as ColumnType, ChecklistItem, BoardTheme } from '@/types';
 import { AddTaskDialog } from '@/components/add-task-dialog';
 import { useTasks } from '@/contexts/TaskContext';
 import { useSettings } from '@/contexts/SettingsContext';
@@ -44,8 +44,8 @@ import {
   DropdownMenuSubContent,
   DropdownMenuPortal
 } from "@/components/ui/dropdown-menu";
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { buttonVariants } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { BoardThemeCustomizer } from '@/components/board-theme-customizer';
 
 
 type SortOption = 'priority' | 'deadline' | 'default' | 'title' | 'createdAt';
@@ -65,11 +65,16 @@ interface TaskCardProps {
   onDeleteChecklistItem: (taskId: string, columnId: string, itemId: string) => void;
   onUpdateChecklistItemText: (taskId: string, columnId: string, itemId: string, newText: string) => void;
   isBetaModeEnabled: boolean;
-  getTaskById: (taskId: string) => Task | undefined;
-  dragOverColumn: string | null;
+  getTaskById: (taskId: string) => Task | undefined; // From active board
+  dragOverColumnId: string | null; // Renamed for clarity
+  cardStyle?: React.CSSProperties;
 }
 
-function TaskCard({ task, columnId, onDragStart, onDragEnd, onUpdateTask, onDeleteTask, onAddChecklistItem, onToggleChecklistItem, onDeleteChecklistItem, onUpdateChecklistItemText, isBetaModeEnabled, getTaskById, dragOverColumn }: TaskCardProps) {
+function TaskCard({ 
+  task, columnId, onDragStart, onDragEnd, onUpdateTask, onDeleteTask, 
+  onAddChecklistItem, onToggleChecklistItem, onDeleteChecklistItem, onUpdateChecklistItemText, 
+  isBetaModeEnabled, getTaskById, dragOverColumnId, cardStyle
+}: TaskCardProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editedContent, setEditedContent] = useState(task.content);
   const [newChecklistItem, setNewChecklistItem] = useState('');
@@ -104,7 +109,6 @@ function TaskCard({ task, columnId, onDragStart, onDragEnd, onUpdateTask, onDele
     setEditedChecklistItemText('');
   };
 
-
   const getPriorityBadgeClass = (priority?: 'high' | 'medium' | 'low') => {
     switch (priority) {
       case 'high': return 'bg-red-500/20 text-red-700 dark:bg-red-700/30 dark:text-red-300 border-red-500/30';
@@ -125,7 +129,11 @@ function TaskCard({ task, columnId, onDragStart, onDragEnd, onUpdateTask, onDele
       draggable
       onDragStart={(e) => onDragStart(e, task)}
       onDragEnd={onDragEnd}
-      className={cn("mb-3 p-3 shadow-md hover:shadow-lg transition-shadow duration-200 ease-in-out interactive-card-hover relative", dragOverColumn === columnId && "border-primary border-2" )}
+      className={cn(
+        "mb-3 p-3 shadow-md hover:shadow-lg transition-shadow duration-200 ease-in-out interactive-card-hover relative",
+        dragOverColumnId === columnId && "border-primary border-2"
+      )}
+      style={cardStyle} // Apply dynamic card style
     >
       <CardContent className="p-0 space-y-2">
         <div className="flex justify-between items-start">
@@ -193,7 +201,6 @@ function TaskCard({ task, columnId, onDragStart, onDragEnd, onUpdateTask, onDele
           </div>
         )}
 
-
         {isBetaModeEnabled && task.checklist && task.checklist.length > 0 && (
           <div className="mt-2 space-y-1.5">
             <Label className="text-xs font-medium flex items-center text-muted-foreground">
@@ -251,7 +258,6 @@ function TaskCard({ task, columnId, onDragStart, onDragEnd, onUpdateTask, onDele
             </div>
         )}
 
-
         <div className="flex flex-wrap gap-1.5 items-center pt-1.5">
           {task.priority && (
             <Badge variant="outline" className={cn("text-xs px-1.5 py-0.5", getPriorityBadgeClass(task.priority))}>
@@ -300,21 +306,49 @@ function TaskCard({ task, columnId, onDragStart, onDragEnd, onUpdateTask, onDele
 }
 
 export function KanbanBoard() {
-  const { columns, addTask, moveTask, deleteTask, updateTask, addColumn, updateColumnTitle, deleteColumn, updateColumnWipLimit, addChecklistItem, toggleChecklistItem, deleteChecklistItem, updateChecklistItemText, getTaskById } = useTasks();
+  const { 
+    getActiveBoard, addTask, moveTask, deleteTask, updateTask, 
+    addColumn, updateColumnTitle, deleteColumn, updateColumnWipLimit, 
+    addChecklistItem, toggleChecklistItem, deleteChecklistItem, updateChecklistItemText, getTaskById,
+    updateBoardTheme, // Added for theme customization
+  } = useTasks();
+  
+  const activeBoard = getActiveBoard();
   const { isBetaModeEnabled } = useSettings();
   const [showConfetti, setShowConfetti] = useState(false);
   const [windowSize, setWindowSize] = useState({ width: 0, height: 0 });
   const { toast } = useToast();
   const [isAddTaskDialogOpen, setIsAddTaskDialogOpen] = useState(false);
   const [draggedTask, setDraggedTask] = useState<Task | null>(null);
-  const [dragOverColumn, setDragOverColumn] = useState<string | null>(null);
+  const [dragOverColumnId, setDragOverColumnId] = useState<string | null>(null); // Renamed
   const [newColumnTitle, setNewColumnTitle] = useState('');
   const [editingColumnId, setEditingColumnId] = useState<string | null>(null);
   const [currentEditingColumnTitle, setCurrentEditingColumnTitle] = useState('');
+  const [isThemeCustomizerOpen, setIsThemeCustomizerOpen] = useState(false);
+
 
   const [priorityFilter, setPriorityFilter] = useState<PriorityFilter>('all');
   const [tagFilter, setTagFilter] = useState<string>('');
   const [columnSortOptions, setColumnSortOptions] = useState<Record<string, SortOption>>({});
+
+  const boardStyle = useMemo(() => {
+    const theme = activeBoard?.theme;
+    if (!theme) return {};
+    const style: React.CSSProperties = {};
+    if (theme.backgroundColor) style['--board-background-color' as any] = theme.backgroundColor;
+    // Add other theme properties to CSS variables if needed
+    return style;
+  }, [activeBoard?.theme]);
+
+  const columnHeaderStyle = useMemo(() => (color?: string) => {
+    if (!color) return {};
+    return { backgroundColor: color };
+  }, []);
+
+  const cardStyle = useMemo(() => (color?: string) => {
+    if (!color) return {};
+    return { backgroundColor: color };
+  }, []);
 
 
   useEffect(() => {
@@ -324,7 +358,7 @@ export function KanbanBoard() {
       }
     };
     if (typeof window !== 'undefined') {
-      handleResize(); // Initial size
+      handleResize();
       window.addEventListener('resize', handleResize);
       return () => window.removeEventListener('resize', handleResize);
     }
@@ -334,90 +368,66 @@ export function KanbanBoard() {
     setDraggedTask(task);
     e.currentTarget.style.opacity = '0.5';
     e.dataTransfer.effectAllowed = "move";
-    e.dataTransfer.setData("text/plain", task.id); // Necessary for Firefox
+    e.dataTransfer.setData("text/plain", task.id);
   };
 
   const handleDragEnd = (e: React.DragEvent<HTMLDivElement>) => {
      e.currentTarget.style.opacity = '1';
-     setDragOverColumn(null); // Clear drag over visual cue
+     setDragOverColumnId(null);
      setDraggedTask(null);
   };
   
   const handleDragOver = (e: React.DragEvent<HTMLDivElement>, columnId: string) => {
     e.preventDefault();
-    setDragOverColumn(columnId); // Set columnId to highlight
+    setDragOverColumnId(columnId);
   };
 
   const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
-    // Only clear if leaving the specific droppable area, not just children
     if (e.currentTarget.contains(e.relatedTarget as Node)) {
         return;
     }
-    setDragOverColumn(null);
+    setDragOverColumnId(null);
   };
   
   const handleDrop = (e: React.DragEvent<HTMLDivElement>, targetColumnId: string) => {
     e.preventDefault();
-    if (!draggedTask) return;
+    if (!draggedTask || !activeBoard) return;
 
-    const targetColumn = columns.find(col => col.id === targetColumnId);
+    const targetColumn = activeBoard.columns.find(col => col.id === targetColumnId);
     if (targetColumn && targetColumn.wipLimit && targetColumn.tasks.length >= targetColumn.wipLimit) {
         toast({
             title: "WIP Limit Reached",
             description: `Column "${targetColumn.title}" has reached its Work-In-Progress limit of ${targetColumn.wipLimit}.`,
             variant: "destructive",
         });
-        setDragOverColumn(null);
+        setDragOverColumnId(null);
         setDraggedTask(null);
-        // Reset opacity if not done in dragEnd somehow (though it should be)
-        const draggedElement = document.getElementById(draggedTask.id); // Assuming task cards have id=task.id
-        if (draggedElement) draggedElement.style.opacity = '1';
         return;
     }
-
 
     const { task: movedTaskData, automated } = moveTask(draggedTask.id, draggedTask.status, targetColumnId, isBetaModeEnabled);
     
     if (movedTaskData) {
-      toast({
-        title: "Task Moved",
-        description: `Task "${movedTaskData.content}" moved to "${columns.find(c => c.id === targetColumnId)?.title}".`,
-      });
-
-      if (automated) {
-        toast({
-            title: "Automation Applied",
-            description: "Checklist items automatically marked as complete.",
-            variant: "default",
-        });
+      if (activeBoard.columns.find(c => c.id === targetColumnId)?.title.toLowerCase() === 'done') {
+        setShowConfetti(true);
+        setTimeout(() => setShowConfetti(false), 5000);
       }
     }
-
-
     setDraggedTask(null);
-    setDragOverColumn(null);
-
-    if (columns.find(c => c.id === targetColumnId)?.title.toLowerCase() === 'done') {
-      setShowConfetti(true);
-      setTimeout(() => setShowConfetti(false), 5000);
-    }
+    setDragOverColumnId(null);
   };
 
   const handleAddTaskLocal = (taskData: Omit<Task, 'id' | 'status' | 'createdAt'>) => {
-    const firstColumnId = columns.length > 0 ? columns[0].id : undefined;
+    if (!activeBoard) return;
+    const firstColumnId = activeBoard.columns.length > 0 ? activeBoard.columns[0].id : undefined;
     addTask(taskData, firstColumnId);
     setIsAddTaskDialogOpen(false);
-    toast({
-        title: "Task Added!",
-        description: `Task "${taskData.content}" has been successfully added.`,
-    });
   };
 
   const handleAddColumn = () => {
     if (newColumnTitle.trim()) {
       addColumn(newColumnTitle.trim());
       setNewColumnTitle('');
-      toast({ title: "Column Added", description: `Column "${newColumnTitle.trim()}" created.`});
     }
   };
   
@@ -429,7 +439,6 @@ export function KanbanBoard() {
   const handleSaveColumnTitle = (columnId: string) => {
     if (currentEditingColumnTitle.trim()) {
       updateColumnTitle(columnId, currentEditingColumnTitle.trim());
-      toast({ title: "Column Updated", description: "Column title changed."});
     }
     setEditingColumnId(null);
     setCurrentEditingColumnTitle('');
@@ -439,10 +448,8 @@ export function KanbanBoard() {
     const limit = parseInt(limitStr, 10);
     if (!isNaN(limit) && limit >=0) {
         updateColumnWipLimit(columnId, limit);
-        toast({ title: "WIP Limit Updated", description: `WIP limit for column set to ${limit === 0 ? 'None' : limit}.`});
     } else if (limitStr === "") {
-        updateColumnWipLimit(columnId, undefined); // Clear WIP limit
-        toast({ title: "WIP Limit Cleared", description: `WIP limit for column removed.`});
+        updateColumnWipLimit(columnId, undefined);
     } else {
         toast({ title: "Invalid WIP Limit", description: "Please enter a valid number for WIP limit.", variant: "destructive"});
     }
@@ -454,8 +461,6 @@ export function KanbanBoard() {
 
   const sortedAndFilteredTasks = (tasks: Task[], columnId: string): Task[] => {
     let processedTasks = [...tasks];
-
-    // Global Filters (Beta)
     if (isBetaModeEnabled) {
       if (priorityFilter !== 'all') {
         processedTasks = processedTasks.filter(task => task.priority === priorityFilter);
@@ -467,45 +472,38 @@ export function KanbanBoard() {
         );
       }
     }
-
-    // Column Specific Sorting (Beta)
     const sortOption = columnSortOptions[columnId] || 'default';
     if (isBetaModeEnabled && sortOption !== 'default') {
       processedTasks.sort((a, b) => {
-        if (sortOption === 'priority') {
-          return (priorityOrder[a.priority] || 4) - (priorityOrder[b.priority] || 4);
-        }
+        if (sortOption === 'priority') return (priorityOrder[a.priority] || 4) - (priorityOrder[b.priority] || 4);
         if (sortOption === 'deadline') {
-          if (!a.deadline && !b.deadline) return 0;
-          if (!a.deadline) return 1;
-          if (!b.deadline) return -1;
+          if (!a.deadline && !b.deadline) return 0; if (!a.deadline) return 1; if (!b.deadline) return -1;
           return compareAsc(parseISO(a.deadline), parseISO(b.deadline));
         }
-        if (sortOption === 'title') {
-          return a.content.localeCompare(b.content);
-        }
-        if (sortOption === 'createdAt') {
-           return compareAsc(parseISO(a.createdAt), parseISO(b.createdAt));
-        }
-        return 0; // Default or unknown sort
+        if (sortOption === 'title') return a.content.localeCompare(b.content);
+        if (sortOption === 'createdAt') return compareAsc(parseISO(a.createdAt), parseISO(b.createdAt));
+        return 0;
       });
     }
-    // Default sorting might be by creation or manual order if implemented
     return processedTasks;
   };
 
+  if (!activeBoard) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full text-center p-4 animate-fadeInUp">
+        <FolderKanban className="w-32 h-32 text-muted-foreground mb-6" />
+        <h2 className="text-2xl font-semibold mb-3">No Board Selected</h2>
+        <p className="text-muted-foreground">
+          Please select a board from the sidebar menu, or create a new one to get started.
+        </p>
+      </div>
+    );
+  }
 
   return (
-    <div className="p-4 space-y-6 animate-fadeInUp">
+    <div className="p-4 space-y-6 animate-fadeInUp" style={{ backgroundColor: activeBoard.theme?.backgroundColor || 'var(--background)' }}>
       {showConfetti && windowSize.width > 0 && windowSize.height > 0 && (
-        <Confetti
-          width={windowSize.width}
-          height={windowSize.height}
-          recycle={false}
-          numberOfPieces={500} 
-          gravity={0.15} 
-          tweenDuration={7000}
-        />
+        <Confetti width={windowSize.width} height={windowSize.height} recycle={false} numberOfPieces={500} gravity={0.15} tweenDuration={7000}/>
       )}
       <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
         <AddTaskDialog open={isAddTaskDialogOpen} onOpenChange={setIsAddTaskDialogOpen} onAddTask={handleAddTaskLocal}>
@@ -514,49 +512,55 @@ export function KanbanBoard() {
           </Button>
         </AddTaskDialog>
         
-        {isBetaModeEnabled && (
-          <Popover>
-            <PopoverTrigger asChild>
-              <Button variant="outline" className="shadow-sm hover:shadow-md transition-shadow">
-                <Filter className="mr-2 h-4 w-4" /> Filters & Sort
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-80 p-4 space-y-4" align="end">
-              <div>
-                <Label htmlFor="priority-filter" className="text-sm font-medium">Filter by Priority</Label>
-                <Select value={priorityFilter} onValueChange={(value) => setPriorityFilter(value as PriorityFilter)}>
-                  <SelectTrigger id="priority-filter" className="mt-1">
-                    <SelectValue placeholder="Select priority" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Priorities</SelectItem>
-                    <SelectItem value="high">High</SelectItem>
-                    <SelectItem value="medium">Medium</SelectItem>
-                    <SelectItem value="low">Low</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label htmlFor="tag-filter" className="text-sm font-medium">Filter by Tags (comma-sep)</Label>
-                <Input 
-                  id="tag-filter" 
-                  value={tagFilter} 
-                  onChange={(e) => setTagFilter(e.target.value)} 
-                  placeholder="e.g. design, dev"
-                  className="mt-1"
-                />
-              </div>
-               <p className="text-xs text-muted-foreground">Note: Column-specific sorting is available in each column's options menu.</p>
-            </PopoverContent>
-          </Popover>
-        )}
+        <div className="flex items-center gap-2">
+            {isBetaModeEnabled && (
+            <Popover>
+                <PopoverTrigger asChild>
+                <Button variant="outline" className="shadow-sm hover:shadow-md transition-shadow">
+                    <Filter className="mr-2 h-4 w-4" /> Filters & Sort
+                </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-80 p-4 space-y-4" align="end">
+                <div>
+                    <Label htmlFor="priority-filter" className="text-sm font-medium">Filter by Priority</Label>
+                    <Select value={priorityFilter} onValueChange={(value) => setPriorityFilter(value as PriorityFilter)}>
+                    <SelectTrigger id="priority-filter" className="mt-1">
+                        <SelectValue placeholder="Select priority" />
+                    </SelectTrigger>
+                    <SelectContent>
+                        <SelectItem value="all">All Priorities</SelectItem>
+                        <SelectItem value="high">High</SelectItem>
+                        <SelectItem value="medium">Medium</SelectItem>
+                        <SelectItem value="low">Low</SelectItem>
+                    </SelectContent>
+                    </Select>
+                </div>
+                <div>
+                    <Label htmlFor="tag-filter" className="text-sm font-medium">Filter by Tags (comma-sep)</Label>
+                    <Input 
+                    id="tag-filter" 
+                    value={tagFilter} 
+                    onChange={(e) => setTagFilter(e.target.value)} 
+                    placeholder="e.g. design, dev"
+                    className="mt-1"
+                    />
+                </div>
+                <p className="text-xs text-muted-foreground">Note: Column-specific sorting is available in each column's options menu.</p>
+                </PopoverContent>
+            </Popover>
+            )}
+             <Button variant="outline" onClick={() => setIsThemeCustomizerOpen(true)} className="shadow-sm hover:shadow-md transition-shadow">
+                <Palette className="mr-2 h-4 w-4" /> Customize Board
+            </Button>
+        </div>
       </div>
 
       <ScrollArea className="w-full pb-4">
-         <div className="flex gap-4 items-start">
-          {columns.map(column => {
+         <div className="flex gap-4 items-start" style={boardStyle}>
+          {activeBoard.columns.map(column => {
             const displayTasks = sortedAndFilteredTasks(column.tasks, column.id);
             const wipLimitExceeded = column.wipLimit && column.tasks.length > column.wipLimit;
+            const currentColumnHeaderStyle = columnHeaderStyle(activeBoard.theme?.columnHeaderColor);
 
             return (
               <div
@@ -564,9 +568,12 @@ export function KanbanBoard() {
                 onDragOver={(e) => handleDragOver(e, column.id)}
                 onDrop={(e) => handleDrop(e, column.id)}
                 onDragLeave={handleDragLeave}
-                className={cn("min-w-[300px] max-w-[350px] flex-shrink-0 bg-muted/30 dark:bg-neutral-800/50 rounded-lg shadow-lg transition-all duration-300 ease-in-out", dragOverColumn === column.id && "ring-2 ring-primary ring-offset-2 dark:ring-offset-neutral-900", wipLimitExceeded && "border-2 border-destructive/70" )}
+                className={cn("min-w-[300px] max-w-[350px] flex-shrink-0 bg-muted/30 dark:bg-neutral-800/50 rounded-lg shadow-lg transition-all duration-300 ease-in-out", dragOverColumnId === column.id && "ring-2 ring-primary ring-offset-2 dark:ring-offset-neutral-900", wipLimitExceeded && "border-2 border-destructive/70" )}
               >
-                <CardHeader className="p-3 border-b border-border/70 dark:border-neutral-700/70 flex flex-row justify-between items-center sticky top-0 bg-muted/50 dark:bg-neutral-800/70 backdrop-blur-sm z-10 rounded-t-lg">
+                <CardHeader 
+                    className="p-3 border-b border-border/70 dark:border-neutral-700/70 flex flex-row justify-between items-center sticky top-0 bg-muted/50 dark:bg-neutral-800/70 backdrop-blur-sm z-10 rounded-t-lg"
+                    style={currentColumnHeaderStyle}
+                >
                   {editingColumnId === column.id ? (
                      <Input 
                         value={currentEditingColumnTitle} 
@@ -584,7 +591,7 @@ export function KanbanBoard() {
                         {column.title} ({column.tasks.length})
                         {isBetaModeEnabled && column.wipLimit && (
                             <span className={cn("text-xs ml-1.5", wipLimitExceeded ? "text-destructive font-bold" : "text-muted-foreground")}>
-                                (WIP: {column.wipLimit})
+                                (WIP: {column.wipLimit === 0 ? '∞' : column.wipLimit})
                             </span>
                         )}
                     </CardTitle>
@@ -616,13 +623,13 @@ export function KanbanBoard() {
                             </DropdownMenuSub>
                              <DropdownMenuSeparator />
                              <div className="p-2 space-y-1">
-                                <Label htmlFor={`wip-${column.id}`} className="text-xs px-1">WIP Limit</Label>
+                                <Label htmlFor={`wip-${column.id}`} className="text-xs px-1">WIP Limit (0 for none)</Label>
                                 <Input
                                     id={`wip-${column.id}`}
                                     type="number"
                                     min="0"
                                     placeholder="None"
-                                    defaultValue={column.wipLimit}
+                                    defaultValue={column.wipLimit === undefined ? '' : column.wipLimit}
                                     onChange={(e) => handleUpdateWipLimit(column.id, e.target.value)}
                                     className="h-8 text-sm"
                                 />
@@ -637,7 +644,7 @@ export function KanbanBoard() {
                                 <AlertDialogHeader>
                                 <AlertDialogTitle>Delete Column &quot;{column.title}&quot;?</AlertDialogTitle>
                                 <AlertDialogDescription>
-                                    This will delete the column and all its tasks. This action cannot be undone.
+                                    This will delete the column and all its tasks from the board &quot;{activeBoard.name}&quot;. This action cannot be undone.
                                 </AlertDialogDescription>
                                 </AlertDialogHeader>
                                 <AlertDialogFooter>
@@ -649,8 +656,8 @@ export function KanbanBoard() {
                     </DropdownMenu>
                   )}
                 </CardHeader>
-                <ScrollArea className="h-[calc(100vh-18rem)] p-1 rounded-b-lg"> {/* Adjusted height */}
-                  <CardContent className="p-2 space-y-0"> {/* Removed default CardContent vertical padding, tasks handle their own margin */}
+                <ScrollArea className="h-[calc(100vh-18rem)] p-1 rounded-b-lg">
+                  <CardContent className="p-2 space-y-0">
                   {wipLimitExceeded && (
                       <div className="p-2 mb-2 text-xs text-destructive-foreground bg-destructive/80 rounded-md flex items-center gap-2 shadow-sm">
                           <AlertTriangle className="h-4 w-4"/> WIP limit exceeded!
@@ -675,8 +682,9 @@ export function KanbanBoard() {
                         onDeleteChecklistItem={deleteChecklistItem}
                         onUpdateChecklistItemText={updateChecklistItemText}
                         isBetaModeEnabled={isBetaModeEnabled}
-                        getTaskById={getTaskById}
-                        dragOverColumn={dragOverColumn}
+                        getTaskById={getTaskById} // Pass the context's getTaskById
+                        dragOverColumnId={dragOverColumnId}
+                        cardStyle={cardStyle(activeBoard.theme?.cardColor)}
                       />
                     </AlertDialog>
                   ))}
@@ -705,8 +713,7 @@ export function KanbanBoard() {
           )}
         </div>
       </ScrollArea>
+      <BoardThemeCustomizer board={activeBoard} open={isThemeCustomizerOpen} onOpenChange={setIsThemeCustomizerOpen} />
     </div>
   );
 }
-
-    

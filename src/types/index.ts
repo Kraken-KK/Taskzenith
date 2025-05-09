@@ -7,11 +7,19 @@ export interface ChecklistItem {
   completed: boolean;
 }
 
+// Define board theme customization options
+export interface BoardTheme {
+  primaryColor?: string; // Example: HSL string for primary actions, highlights
+  backgroundColor?: string; // Example: HSL string for board background
+  columnHeaderColor?: string; // Example: HSL string for column headers
+  cardColor?: string; // Example: HSL string for task cards
+}
+
 // Define the structure of a task
 export interface Task {
   id: string;
   content: string;
-  status: string; // Changed to string to support dynamic column IDs
+  status: string; // Column ID this task belongs to
   priority: 'high' | 'medium' | 'low';
   deadline?: string; // ISO string format recommended
   dependencies: string[]; // Array of task IDs this task depends on
@@ -23,8 +31,17 @@ export interface Task {
 
 // Define the structure of a column on the Kanban board
 export interface Column {
-  id: string; // Changed to string for dynamic column IDs
+  id: string;
   title: string;
-  tasks: Task[];
-  wipLimit?: number; // Added for beta feature: WIP limits
+  tasks: Task[]; // Tasks are directly within columns
+  wipLimit?: number;
+}
+
+// Define the structure of a Kanban Board
+export interface Board {
+  id: string;
+  name: string;
+  columns: Column[];
+  theme?: BoardTheme; // Optional theme customization
+  createdAt: string; // ISO string format for board creation time
 }

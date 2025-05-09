@@ -1,3 +1,4 @@
+
 'use client';
 
 import React, { useState, useEffect } from 'react';
@@ -12,20 +13,32 @@ import type { Task } from '@/types';
 import { cn } from '@/lib/utils';
 
 export function PrioritizeTasksView() {
-  const { getAllTasks } = useTasks();
+  const { getAllTasksOfActiveBoard, getActiveBoard } = useTasks(); // Use getAllTasksOfActiveBoard
   const [isLoading, setIsLoading] = useState(false);
   const [prioritizedResult, setPrioritizedResult] = useState<PrioritizeTasksOutput | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [currentTasks, setCurrentTasks] = useState<Task[]>([]);
+  
+  const activeBoard = getActiveBoard();
 
   useEffect(() => {
-    setCurrentTasks(getAllTasks());
-  }, [getAllTasks]);
+    if (activeBoard) {
+      setCurrentTasks(getAllTasksOfActiveBoard());
+    } else {
+      setCurrentTasks([]);
+    }
+  }, [getAllTasksOfActiveBoard, activeBoard]);
 
   const handlePrioritizeTasks = async () => {
     setIsLoading(true);
     setError(null);
     setPrioritizedResult(null);
+
+    if (!activeBoard) {
+        setError("No active board selected. Please select a board to prioritize its tasks.");
+        setIsLoading(false);
+        return;
+    }
 
     const tasksToPrioritize = currentTasks
       .filter(task => task.status !== 'done') // Only prioritize non-done tasks
@@ -38,7 +51,7 @@ export function PrioritizeTasksView() {
       }));
 
     if (tasksToPrioritize.length === 0) {
-      setError("No active tasks to prioritize. Add some tasks to your board first!");
+      setError(`No active tasks in board "${activeBoard.name}" to prioritize. Add some tasks first!`);
       setIsLoading(false);
       return;
     }
@@ -46,8 +59,6 @@ export function PrioritizeTasksView() {
     const input: PrioritizeTasksInput = { tasks: tasksToPrioritize };
 
     try {
-      // Simulate API delay for testing animations
-      // await new Promise(resolve => setTimeout(resolve, 1500));
       const result = await prioritizeTasks(input);
       setPrioritizedResult(result);
     } catch (err) {
@@ -67,9 +78,9 @@ export function PrioritizeTasksView() {
   return (
     <Card className="max-w-3xl mx-auto shadow-xl interactive-card-hover">
       <CardHeader>
-        <CardTitle>AI Task Prioritization</CardTitle>
+        <CardTitle>AI Task Prioritization {activeBoard ? `for "${activeBoard.name}"` : ''}</CardTitle>
         <CardDescription>
-          Let AI help you decide what to work on next. It considers deadlines, importance, and dependencies.
+          Let AI help you decide what to work on next from your active board. It considers deadlines, importance, and dependencies.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
@@ -81,19 +92,29 @@ export function PrioritizeTasksView() {
           </Alert>
         )}
 
-        {currentTasks.filter(task => task.status !== 'done').length === 0 && !isLoading && !prioritizedResult && !error && (
+        {!activeBoard && !isLoading && (
+            <Alert className="animate-fadeIn">
+                <Info className="h-4 w-4" />
+                <AlertTitle>No Active Board</AlertTitle>
+                <AlertDescription>
+                    Please select or create a board first to prioritize its tasks.
+                </AlertDescription>
+            </Alert>
+        )}
+
+        {activeBoard && currentTasks.filter(task => task.status !== 'done').length === 0 && !isLoading && !prioritizedResult && !error && (
             <Alert className="animate-fadeIn">
                 <Info className="h-4 w-4" />
                 <AlertTitle>No Tasks to Prioritize</AlertTitle>
                 <AlertDescription>
-                    You currently have no active (To Do or In Progress) tasks. Add some tasks to your Kanban board to use this feature.
+                    Board "{activeBoard.name}" currently has no active (To Do or In Progress) tasks. Add some tasks to this board to use the feature.
                 </AlertDescription>
             </Alert>
         )}
 
         <Button
           onClick={handlePrioritizeTasks}
-          disabled={isLoading || currentTasks.filter(task => task.status !== 'done').length === 0}
+          disabled={isLoading || !activeBoard || currentTasks.filter(task => task.status !== 'done').length === 0}
           className="w-full"
         >
           {isLoading ? (
@@ -102,7 +123,7 @@ export function PrioritizeTasksView() {
               Prioritizing...
             </>
           ) : (
-            'Prioritize My Tasks'
+            'Prioritize Tasks on This Board'
           )}
         </Button>
 
@@ -146,7 +167,7 @@ export function PrioritizeTasksView() {
         )}
       </CardContent>
        <CardFooter className="text-xs text-muted-foreground pt-4 border-t">
-            Note: AI prioritization is a suggestion. Use your best judgment to adjust as needed.
+            Note: AI prioritization is a suggestion. Use your best judgment to adjust as needed. These priorities are not automatically applied to your tasks.
        </CardFooter>
     </Card>
   );

@@ -1,3 +1,4 @@
+
 'use client';
 
 import React, { useState } from 'react';
@@ -12,7 +13,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { smartTaskCreation, type SmartTaskCreationInput, type SmartTaskCreationOutput } from '@/ai/flows/smart-task-creation';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Lightbulb, Check, AlertCircle, Loader2, PlusCircle } from 'lucide-react';
+import { Lightbulb, Check, AlertCircle, Loader2, PlusCircle, Info } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useToast } from '@/hooks/use-toast';
@@ -26,12 +27,14 @@ const smartCreateFormSchema = z.object({
 type SmartCreateFormValues = z.infer<typeof smartCreateFormSchema>;
 
 export function SmartTaskCreationView() {
-  const { addTask } = useTasks();
+  const { addTask, getActiveBoard } = useTasks(); // Use addTask from context
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
   const [suggestedTasks, setSuggestedTasks] = useState<string[]>([]);
   const [selectedTasks, setSelectedTasks] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
+  
+  const activeBoard = getActiveBoard();
 
   const form = useForm<SmartCreateFormValues>({
     resolver: zodResolver(smartCreateFormSchema),
@@ -47,19 +50,23 @@ export function SmartTaskCreationView() {
     setSuggestedTasks([]);
     setSelectedTasks([]);
 
+    if (!activeBoard) {
+        setError("No active board selected. Please select a board to add tasks to.");
+        setIsLoading(false);
+        return;
+    }
+
     const input: SmartTaskCreationInput = {
       userGoals: data.userGoals,
       currentProjects: data.currentProjects,
     };
 
     try {
-      // Simulate API delay for testing animations
-      // await new Promise(resolve => setTimeout(resolve, 1500));
       const result: SmartTaskCreationOutput = await smartTaskCreation(input);
       if (result.suggestedTasks && result.suggestedTasks.length > 0) {
         setSuggestedTasks(result.suggestedTasks);
       } else {
-        setSuggestedTasks([]); // Ensure it's an empty array if no tasks
+        setSuggestedTasks([]);
         toast({
           title: "No tasks suggested",
           description: "The AI couldn't suggest any tasks based on your input. Try rephrasing your goals or projects.",
@@ -82,6 +89,14 @@ export function SmartTaskCreationView() {
   };
 
   const handleAddSelectedTasks = () => {
+    if (!activeBoard) {
+      toast({
+        title: "No Active Board",
+        description: "Please select or create a board before adding tasks.",
+        variant: "destructive",
+      });
+      return;
+    }
     if (selectedTasks.length === 0) {
       toast({
         title: "No tasks selected",
@@ -90,12 +105,15 @@ export function SmartTaskCreationView() {
       });
       return;
     }
+    // Determine the first column ID of the active board, or undefined if no columns
+    const targetColumnId = activeBoard.columns.length > 0 ? activeBoard.columns[0].id : undefined;
+
     selectedTasks.forEach(taskContent => {
-      addTask({ content: taskContent, priority: 'medium' }); // Add with default medium priority
+      addTask({ content: taskContent, priority: 'medium' }, targetColumnId); // Add with default medium priority to target column
     });
     toast({
       title: "Tasks Added!",
-      description: `${selectedTasks.length} task(s) added to your 'To Do' list.`,
+      description: `${selectedTasks.length} task(s) added to board "${activeBoard.name}".`,
     });
     setSelectedTasks([]); // Clear selection
   };
@@ -103,12 +121,21 @@ export function SmartTaskCreationView() {
   return (
     <Card className="max-w-3xl mx-auto shadow-xl interactive-card-hover">
       <CardHeader>
-        <CardTitle>Smart Task Creation</CardTitle>
+        <CardTitle>Smart Task Creation {activeBoard ? `for "${activeBoard.name}"` : ''}</CardTitle>
         <CardDescription>
-          Describe your goals and current projects, and let AI suggest relevant tasks for you.
+          Describe your goals and current projects, and let AI suggest relevant tasks. Suggested tasks will be added to the currently active board.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
+        {!activeBoard && (
+             <Alert className="animate-fadeIn">
+                <Info className="h-4 w-4" />
+                <AlertTitle>No Active Board</AlertTitle>
+                <AlertDescription>
+                    Please select or create a board first. Suggested tasks will be added to the active board.
+                </AlertDescription>
+            </Alert>
+        )}
         <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
           <div>
             <Label htmlFor="userGoals">Your Main Goals</Label>
@@ -121,6 +148,7 @@ export function SmartTaskCreationView() {
                   placeholder="e.g., Launch a new product by Q4, Improve team productivity by 15%"
                   {...field}
                   className="mt-1 transition-shadow duration-200 focus:shadow-lg"
+                  disabled={!activeBoard || isLoading}
                 />
               )}
             />
@@ -139,6 +167,7 @@ export function SmartTaskCreationView() {
                   placeholder="e.g., Website Redesign, Marketing Campaign X, Mobile App v2"
                   {...field}
                   className="mt-1 transition-shadow duration-200 focus:shadow-lg"
+                  disabled={!activeBoard || isLoading}
                 />
               )}
             />
@@ -146,7 +175,7 @@ export function SmartTaskCreationView() {
               <p className="text-sm text-destructive mt-1 animate-fadeIn">{form.formState.errors.currentProjects.message}</p>
             )}
           </div>
-          <Button type="submit" disabled={isLoading} className="w-full">
+          <Button type="submit" disabled={isLoading || !activeBoard} className="w-full">
             {isLoading ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -196,13 +225,13 @@ export function SmartTaskCreationView() {
                 ))}
               </ul>
             </ScrollArea>
-            <Button onClick={handleAddSelectedTasks} disabled={selectedTasks.length === 0 || isLoading} className="w-full">
+            <Button onClick={handleAddSelectedTasks} disabled={selectedTasks.length === 0 || isLoading || !activeBoard} className="w-full">
               <PlusCircle className="mr-2 h-4 w-4" />
               Add Selected ({selectedTasks.length}) to Board
             </Button>
           </div>
         )}
-        { !isLoading && form.formState.isSubmitSuccessful && suggestedTasks.length === 0 && !error && (
+        { !isLoading && form.formState.isSubmitSuccessful && suggestedTasks.length === 0 && !error && activeBoard && (
              <Alert className="animate-fadeIn">
                 <AlertCircle className="h-4 w-4" />
                 <AlertTitle>No Suggestions</AlertTitle>
