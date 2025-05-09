@@ -3,7 +3,7 @@
 
 import React from 'react';
 import { useTheme } from '@/contexts/ThemeContext';
-import { useSettings } from '@/contexts/SettingsContext'; // Import useSettings
+import { useSettings, type InteractionStyle } from '@/contexts/SettingsContext';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import {
@@ -13,13 +13,20 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Switch } from '@/components/ui/switch'; // Import Switch
-import { Moon, Sun, Laptop, Zap } from 'lucide-react'; // Added Zap for Beta
+import { Switch } from '@/components/ui/switch';
+import { Moon, Sun, Laptop, Zap, MessageCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
+
+const interactionStyleOptions: { value: InteractionStyle; label: string; description: string }[] = [
+  { value: 'friendly', label: 'Friendly', description: 'Casual and approachable.' },
+  { value: 'formal', label: 'Formal', description: 'Professional and direct.' },
+  { value: 'concise', label: 'Concise', description: 'Short and to the point.' },
+  { value: 'detailed', label: 'Detailed', description: 'Provides thorough explanations.' },
+];
 
 export function SettingsView() {
   const { theme, setTheme } = useTheme();
-  const { isBetaModeEnabled, setIsBetaModeEnabled } = useSettings();
+  const { isBetaModeEnabled, setIsBetaModeEnabled, interactionStyle, setInteractionStyle } = useSettings();
 
   return (
     <Card className="max-w-2xl mx-auto shadow-xl interactive-card-hover">
@@ -27,9 +34,10 @@ export function SettingsView() {
         <CardTitle>Application Settings</CardTitle>
       </CardHeader>
       <CardContent className="space-y-6">
+        {/* Theme Setting */}
         <div className="flex items-center justify-between p-4 border rounded-lg shadow-sm hover:shadow-md transition-shadow duration-200">
           <div className="space-y-0.5">
-            <Label htmlFor="theme-select" className="text-base font-medium"> {/* Increased font size */}
+            <Label htmlFor="theme-select" className="text-base font-medium">
               Theme
             </Label>
             <p className="text-sm text-muted-foreground">
@@ -63,10 +71,35 @@ export function SettingsView() {
           </Select>
         </div>
 
+        {/* AI Interaction Style Setting */}
+        <div className="flex items-center justify-between p-4 border rounded-lg shadow-sm hover:shadow-md transition-shadow duration-200">
+          <div className="space-y-0.5">
+            <Label htmlFor="interaction-style-select" className="text-base font-medium flex items-center gap-2">
+              <MessageCircle className="h-5 w-5 text-primary" /> AI Interaction Style
+            </Label>
+            <p className="text-sm text-muted-foreground">
+              Choose how Jack, the AI Assistant, communicates with you.
+            </p>
+          </div>
+          <Select value={interactionStyle} onValueChange={(value) => setInteractionStyle(value as InteractionStyle)}>
+            <SelectTrigger id="interaction-style-select" className="w-[180px] transition-all duration-150 ease-in-out hover:border-primary focus:shadow-outline-primary">
+              <SelectValue placeholder="Select style" />
+            </SelectTrigger>
+            <SelectContent className="transition-opacity duration-150 ease-in-out">
+              {interactionStyleOptions.map(opt => (
+                <SelectItem key={opt.value} value={opt.value}>
+                  {opt.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+
         {/* Beta Mode Setting */}
         <div className="flex items-center justify-between p-4 border rounded-lg shadow-sm hover:shadow-md transition-shadow duration-200">
           <div className="space-y-0.5">
-            <Label htmlFor="beta-mode-switch" className="text-base font-medium flex items-center gap-2"> {/* Increased font size */}
+            <Label htmlFor="beta-mode-switch" className="text-base font-medium flex items-center gap-2">
               <Zap className="h-5 w-5 text-accent" /> Beta Features
             </Label>
             <p className="text-sm text-muted-foreground">
@@ -93,4 +126,3 @@ export function SettingsView() {
     </Card>
   );
 }
-

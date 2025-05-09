@@ -7,16 +7,28 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { Send, Bot, User } from 'lucide-react';
+import { Send, Bot, User, AlertTriangle } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
-import { chatWithAI, type ChatInput, type ChatOutput, type MessageHistoryItem } from '@/ai/flows/chat-flow';
+import { 
+  chatWithAI, 
+  type ChatInput, 
+  type ChatOutput, 
+  type MessageHistoryItem,
+  type BoardContextTask,
+  type UserPreferences,
+  type TaskAction,
+  type PreferenceUpdate
+} from '@/ai/flows/chat-flow';
+import { useTasks } from '@/contexts/TaskContext';
+import { useSettings } from '@/contexts/SettingsContext';
+import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
-
+import type { Task, Column } from '@/types'; // Ensure Column is imported
 
 interface DisplayMessage {
   id: string;
-  sender: 'user' | 'ai';
-  text: string | React.ReactNode; // Allow ReactNode for potential rich content
+  sender: 'user' | 'ai' | 'system';
+  text: string | React.ReactNode;
   timestamp: number;
 }
 
@@ -27,7 +39,10 @@ export function AiChat() {
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Scroll to bottom when new messages are added
+  const { getActiveBoard, updateTask, moveTask } = useTasks();
+  const { interactionStyle, setInteractionStyle } = useSettings();
+  const { toast } = useToast();
+
   useEffect(() => {
     if (scrollAreaRef.current) {
       const scrollViewport = scrollAreaRef.current.querySelector('div[data-radix-scroll-area-viewport]');
@@ -37,10 +52,98 @@ export function AiChat() {
     }
   }, [messages]);
 
-   // Focus input on load
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
+
+  const prepareBoardContext = (): ChatInput['activeBoardContext'] => {
+    const activeBoard = getActiveBoard();
+    if (!activeBoard) return undefined;
+
+    const tasks: BoardContextTask[] = activeBoard.columns.flatMap(col =>
+      col.tasks.map(task => ({
+        id: task.id,
+        content: task.content,
+        statusTitle: col.title, // Use column title as statusTitle
+        priority: task.priority,
+        deadline: task.deadline,
+      }))
+    );
+    const columnNames = activeBoard.columns.map(col => col.title);
+    return { boardName: activeBoard.name, tasks, columnNames };
+  };
+  
+  const prepareUserPreferences = (): UserPreferences | undefined => {
+    return { interactionStyle };
+  };
+
+  const handleTaskAction = (action: TaskAction) => {
+    const activeBoard = getActiveBoard();
+    if (!activeBoard) {
+      toast({ title: "Action Failed", description: "No active board selected.", variant: "destructive" });
+      return;
+    }
+
+    // Find task by content (simple match for now)
+    let foundTask: Task | undefined;
+    let sourceColumn: Column | undefined;
+
+    for (const col of activeBoard.columns) {
+      foundTask = col.tasks.find(t => t.content.toLowerCase() === action.taskIdentifier.toLowerCase());
+      if (foundTask) {
+        sourceColumn = col;
+        break;
+      }
+    }
+
+    if (!foundTask || !sourceColumn) {
+      toast({ title: "Task Not Found", description: `Could not find task: "${action.taskIdentifier}".`, variant: "destructive" });
+      addSystemMessage(`I couldn't find the task "${action.taskIdentifier}" on your board. Could you be more specific or check the task name?`);
+      return;
+    }
+
+    if (action.type === 'updateStatus') {
+      const targetColumn = activeBoard.columns.find(col => col.title.toLowerCase() === action.targetValue.toLowerCase());
+      if (!targetColumn) {
+        toast({ title: "Status Not Found", description: `Could not find status/column: "${action.targetValue}".`, variant: "destructive" });
+        addSystemMessage(`I couldn't find the column "${action.targetValue}" on your board. Available columns are: ${activeBoard.columns.map(c => c.title).join(', ')}.`);
+        return;
+      }
+      moveTask(foundTask.id, sourceColumn.id, targetColumn.id, false); // Assuming isBetaMode false for this generic action
+      toast({ title: "Task Status Updated", description: `Task "${foundTask.content}" moved to "${targetColumn.title}".` });
+      addSystemMessage(`Task "${foundTask.content}" has been moved to "${targetColumn.title}".`);
+
+    } else if (action.type === 'updatePriority') {
+      const newPriority = action.targetValue as 'high' | 'medium' | 'low';
+      if (!['high', 'medium', 'low'].includes(newPriority)) {
+          toast({ title: "Invalid Priority", description: `"${newPriority}" is not a valid priority.`, variant: "destructive" });
+          addSystemMessage(`"${newPriority}" isn't a valid priority. Please use 'high', 'medium', or 'low'.`);
+          return;
+      }
+      updateTask({ id: foundTask.id, priority: newPriority });
+      toast({ title: "Task Priority Updated", description: `Priority of "${foundTask.content}" set to ${newPriority}.` });
+      addSystemMessage(`Priority of "${foundTask.content}" has been set to ${newPriority}.`);
+    }
+  };
+
+  const handlePreferenceUpdate = (update: PreferenceUpdate) => {
+    if (update.type === 'interactionStyle' && update.styleValue) {
+      setInteractionStyle(update.styleValue);
+      toast({ title: "Interaction Style Updated", description: `Jack will now be more ${update.styleValue}.` });
+      addSystemMessage(`Okay, I've updated my interaction style to be more ${update.styleValue}.`);
+    }
+  };
+  
+  const addSystemMessage = (text: string) => {
+    const systemMessage: DisplayMessage = {
+        id: `msg-${Date.now()}-system`,
+        sender: 'system',
+        text,
+        timestamp: Date.now(),
+    };
+    setMessages(prev => [...prev, systemMessage]);
+  };
+
 
   const handleSendMessage = async (e?: React.FormEvent<HTMLFormElement>) => {
     e?.preventDefault();
@@ -54,12 +157,11 @@ export function AiChat() {
       timestamp: Date.now(),
     };
 
-    const updatedMessages = [...messages, userMessage];
-    setMessages(updatedMessages);
+    const currentMessagesForHistory = [...messages, userMessage];
+    setMessages(currentMessagesForHistory);
     setInputValue('');
     setIsLoading(true);
 
-    // Add a placeholder AI message for a more immediate feel
     const thinkingMessageId = `msg-${Date.now()}-ai-thinking`;
     const thinkingMessage: DisplayMessage = {
         id: thinkingMessageId,
@@ -75,40 +177,43 @@ export function AiChat() {
     }
     setMessages((prev) => [...prev, thinkingMessage]);
 
-
-    // Prepare history for AI flow
-    const historyForAI: MessageHistoryItem[] = updatedMessages
-      .filter(msg => msg.id !== thinkingMessageId) // Exclude the current "thinking" message
+    const historyForAI: MessageHistoryItem[] = currentMessagesForHistory
+      .filter(msg => msg.id !== thinkingMessageId && msg.sender !== 'system') 
       .map(msg => ({
         role: msg.sender === 'user' ? 'user' : 'model',
-        parts: [{ text: typeof msg.text === 'string' ? msg.text : 'System message or UI element.' }] // Handle ReactNode gracefully
+        parts: [{ text: typeof msg.text === 'string' ? msg.text : 'System message or UI element.' }]
       }));
     
-    // Remove the last item from historyForAI if it's the user's current query, 
-    // as it's passed separately in `query`
-    if (historyForAI.length > 0 && historyForAI[historyForAI.length -1].role === 'user') {
-        // This logic assumes the last message IS the current user query.
-        // The query field in ChatInput is for the current user message.
-    }
-
+    const aiInput: ChatInput = { 
+      query: trimmedInput, 
+      history: historyForAI.slice(0, -1), // History before current query
+      activeBoardContext: prepareBoardContext(),
+      userPreferences: prepareUserPreferences(),
+    };
 
     try {
-      const aiInput: ChatInput = { query: trimmedInput, history: historyForAI.slice(0, -1) }; // Send history *before* current query
       const aiResponse: ChatOutput = await chatWithAI(aiInput);
 
       const aiMessage: DisplayMessage = {
-        id: `msg-${Date.now()}-ai`, // New ID for the actual response
+        id: `msg-${Date.now()}-ai`,
         sender: 'ai',
         text: aiResponse.response,
         timestamp: Date.now(),
       };
-      // Replace the thinking message with the actual response
       setMessages((prev) => prev.map(msg => msg.id === thinkingMessageId ? aiMessage : msg));
+
+      if (aiResponse.taskAction) {
+        handleTaskAction(aiResponse.taskAction);
+      }
+      if (aiResponse.preferenceUpdate) {
+        handlePreferenceUpdate(aiResponse.preferenceUpdate);
+      }
+
     } catch (error) {
       console.error('Error fetching AI response:', error);
       const errorMessageText = error instanceof Error ? error.message : 'An unknown error occurred.';
-      const errorMessage: DisplayMessage = {
-        id: `msg-${Date.now()}-error`, // New ID for the error
+      const errorDisplayMessage: DisplayMessage = {
+        id: `msg-${Date.now()}-error`,
         sender: 'ai',
         text: (
             <span className="text-destructive">
@@ -117,8 +222,7 @@ export function AiChat() {
         ),
         timestamp: Date.now(),
       };
-      // Replace the thinking message with the error message
-      setMessages((prev) => prev.map(msg => msg.id === thinkingMessageId ? errorMessage : msg));
+      setMessages((prev) => prev.map(msg => msg.id === thinkingMessageId ? errorDisplayMessage : msg));
     } finally {
       setIsLoading(false);
       inputRef.current?.focus();
@@ -126,65 +230,75 @@ export function AiChat() {
   };
 
   return (
-    <Card className="flex flex-col h-full max-h-[calc(100vh-10rem)] w-full max-w-3xl mx-auto shadow-2xl overflow-hidden rounded-xl"> {/* Increased max-w, shadow, rounded */}
-      <CardHeader className="border-b bg-card/80 backdrop-blur-md"> {/* Slightly more blur */}
+    <Card className="flex flex-col h-full max-h-[calc(100vh-10rem)] w-full max-w-3xl mx-auto shadow-2xl overflow-hidden rounded-xl">
+      <CardHeader className="border-b bg-card/80 backdrop-blur-md">
         <CardTitle className="flex items-center gap-2 text-lg font-semibold">
           <Bot className="h-6 w-6 text-primary" /> AI Assistant (Jack)
         </CardTitle>
       </CardHeader>
       <CardContent className="flex-1 p-0">
-        <ScrollArea className="h-full p-4 pt-6" ref={scrollAreaRef}> {/* Added pt-6 for more space from header */}
-          <div className="space-y-6"> {/* Increased space-y */}
+        <ScrollArea className="h-full p-4 pt-6" ref={scrollAreaRef}>
+          <div className="space-y-6">
             {messages.map((message) => (
               <div
                 key={message.id}
                 className={cn(
                   'flex items-end gap-3 animate-fadeInUp',
-                  message.sender === 'user' ? 'justify-end' : 'justify-start'
+                  message.sender === 'user' ? 'justify-end' : 'justify-start',
+                  message.sender === 'system' && 'justify-center'
                 )}
               >
                 {message.sender === 'ai' && (
-                  <Avatar className="h-9 w-9 border-2 border-primary/50 shadow-md"> {/* Enhanced AI avatar */}
+                  <Avatar className="h-9 w-9 border-2 border-primary/50 shadow-md">
                      <AvatarFallback className="bg-primary/10"><Bot className="h-5 w-5 text-primary" /></AvatarFallback>
                   </Avatar>
                 )}
-                <div
-                  className={cn(
-                    'max-w-[80%] rounded-2xl p-3.5 text-sm shadow-lg transition-all duration-300 ease-in-out hover:shadow-xl hover:scale-[1.02]', // Increased rounding, padding, shadow, added hover effect
-                    message.sender === 'user'
-                      ? 'bg-primary text-primary-foreground rounded-br-lg' 
-                      : 'bg-muted text-muted-foreground rounded-bl-lg dark:bg-neutral-700 dark:text-neutral-100'
-                  )}
-                >
-                  {typeof message.text === 'string' ? (
-                     <p className="whitespace-pre-wrap leading-relaxed">{message.text}</p> /* Added leading-relaxed */
-                  ) : (
-                    message.text
-                  )}
-                </div>
+                 {message.sender === 'system' && (
+                   <div className="w-full flex justify-center">
+                    <div className="max-w-[80%] text-xs text-muted-foreground bg-muted/50 p-2 rounded-md shadow-sm flex items-center gap-2">
+                       <AlertTriangle className="h-4 w-4 text-amber-500" />
+                       <span>{message.text}</span>
+                    </div>
+                   </div>
+                )}
+                {message.sender !== 'system' && (
+                    <div
+                    className={cn(
+                        'max-w-[80%] rounded-2xl p-3.5 text-sm shadow-lg transition-all duration-300 ease-in-out hover:shadow-xl hover:scale-[1.02]',
+                        message.sender === 'user'
+                        ? 'bg-primary text-primary-foreground rounded-br-lg' 
+                        : 'bg-muted text-muted-foreground rounded-bl-lg dark:bg-neutral-700 dark:text-neutral-100'
+                    )}
+                    >
+                    {typeof message.text === 'string' ? (
+                        <p className="whitespace-pre-wrap leading-relaxed">{message.text}</p>
+                    ) : (
+                        message.text
+                    )}
+                    </div>
+                )}
                  {message.sender === 'user' && (
-                  <Avatar className="h-9 w-9 border shadow-md"> {/* Enhanced User avatar */}
+                  <Avatar className="h-9 w-9 border shadow-md">
                      <AvatarFallback><User className="h-5 w-5" /></AvatarFallback>
                   </Avatar>
                 )}
               </div>
             ))}
-            {/* Removed the explicit loading skeleton here as the "thinkingMessage" handles this state */}
           </div>
         </ScrollArea>
       </CardContent>
-      <CardFooter className="p-4 border-t bg-card/80 backdrop-blur-md"> {/* Slightly more blur */}
-        <form onSubmit={handleSendMessage} className="flex w-full items-center space-x-3"> {/* Increased space */}
+      <CardFooter className="p-4 border-t bg-card/80 backdrop-blur-md">
+        <form onSubmit={handleSendMessage} className="flex w-full items-center space-x-3">
           <Input
             ref={inputRef}
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
-            placeholder="Ask Jack about your tasks..."
+            placeholder="Ask Jack about your tasks or preferences..."
             disabled={isLoading}
-            className="flex-1 h-11 text-base transition-shadow duration-200 focus:shadow-xl focus:border-primary/50 rounded-lg" /* Taller input, larger text, stronger focus */
+            className="flex-1 h-11 text-base transition-shadow duration-200 focus:shadow-xl focus:border-primary/50 rounded-lg"
             autoComplete="off"
           />
-          <Button type="submit" size="lg" disabled={isLoading || !inputValue.trim()} className="transition-all duration-150 ease-in-out hover:bg-primary/90 active:scale-95 shadow-md hover:shadow-lg"> {/* Larger button, more pronounced effects */}
+          <Button type="submit" size="lg" disabled={isLoading || !inputValue.trim()} className="transition-all duration-150 ease-in-out hover:bg-primary/90 active:scale-95 shadow-md hover:shadow-lg">
             <Send className="h-5 w-5" />
             <span className="sr-only">Send message</span>
           </Button>
