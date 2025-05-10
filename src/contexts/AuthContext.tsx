@@ -12,8 +12,8 @@ import {
   signInWithEmailAndPassword as signInWithFirebase, 
   signOut as signOutFirebase,
   updateProfile as updateFirebaseProfile,
-  GoogleAuthProvider, // Import GoogleAuthProvider
-  signInWithPopup // Import signInWithPopup
+  GoogleAuthProvider,
+  signInWithPopup
 } from 'firebase/auth';
 import { useToast } from '@/hooks/use-toast';
 import { useRouter } from 'next/navigation';
@@ -25,7 +25,7 @@ export interface AppUser {
   email: string | null;
   displayName: string | null;
   photoURL?: string | null;
-  provider: AuthProviderType | 'google'; // Add 'google' to provider type
+  provider: AuthProviderType | 'google';
 }
 
 interface AuthContextType {
@@ -35,7 +35,7 @@ interface AuthContextType {
   isGuest: boolean;
   signupWithFirebase: (email: string, password: string) => Promise<AppUser | null>;
   loginWithFirebase: (email: string, password: string) => Promise<AppUser | null>;
-  signInWithGoogleFirebase: () => Promise<AppUser | null>; // Add Google sign-in method
+  signInWithGoogleFirebase: () => Promise<AppUser | null>;
   signupWithSupabase: (email: string, password: string) => Promise<AppUser | null>;
   loginWithSupabase: (email: string, password: string) => Promise<AppUser | null>;
   logout: () => Promise<void>;
@@ -80,7 +80,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     setLoading(true);
-    const storedGuestMode = localStorage.getItem(GUEST_MODE_STORAGE_KEY) === 'true';
+    const storedGuestMode = typeof window !== 'undefined' ? localStorage.getItem(GUEST_MODE_STORAGE_KEY) === 'true' : false;
     setIsGuest(storedGuestMode);
 
     if (storedGuestMode) {
@@ -92,16 +92,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const unsubscribeFirebase = onFirebaseAuthStateChanged(firebaseAuth, (firebaseUser) => {
       if (firebaseUser && !isGuest) { 
-        // Determine if this was a Google sign-in by checking providerData
         const isGoogleSignIn = firebaseUser.providerData.some(pd => pd.providerId === GoogleAuthProvider.PROVIDER_ID);
         const appUser = mapFirebaseUserToAppUser(firebaseUser, isGoogleSignIn ? 'google' : undefined);
         setCurrentUser(appUser);
         setCurrentProvider(isGoogleSignIn ? 'google' : 'firebase');
-        localStorage.setItem(AUTH_PROVIDER_STORAGE_KEY, isGoogleSignIn ? 'google' : 'firebase');
-      } else if (localStorage.getItem(AUTH_PROVIDER_STORAGE_KEY) === 'firebase' || localStorage.getItem(AUTH_PROVIDER_STORAGE_KEY) === 'google') { 
+        if (typeof window !== 'undefined') localStorage.setItem(AUTH_PROVIDER_STORAGE_KEY, isGoogleSignIn ? 'google' : 'firebase');
+      } else if (typeof window !== 'undefined' && (localStorage.getItem(AUTH_PROVIDER_STORAGE_KEY) === 'firebase' || localStorage.getItem(AUTH_PROVIDER_STORAGE_KEY) === 'google')) { 
         setCurrentUser(null);
         setCurrentProvider(null);
-        localStorage.removeItem(AUTH_PROVIDER_STORAGE_KEY);
+       if (typeof window !== 'undefined') localStorage.removeItem(AUTH_PROVIDER_STORAGE_KEY);
       }
       setLoading(false);
     });
@@ -114,17 +113,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const appUser = mapSupabaseUserToAppUser(supabaseUser);
           setCurrentUser(appUser);
           setCurrentProvider('supabase');
-          localStorage.setItem(AUTH_PROVIDER_STORAGE_KEY, 'supabase');
-        } else if (localStorage.getItem(AUTH_PROVIDER_STORAGE_KEY) === 'supabase') {
+          if (typeof window !== 'undefined') localStorage.setItem(AUTH_PROVIDER_STORAGE_KEY, 'supabase');
+        } else if (typeof window !== 'undefined' && localStorage.getItem(AUTH_PROVIDER_STORAGE_KEY) === 'supabase') {
           setCurrentUser(null);
           setCurrentProvider(null);
-          localStorage.removeItem(AUTH_PROVIDER_STORAGE_KEY);
+          if (typeof window !== 'undefined') localStorage.removeItem(AUTH_PROVIDER_STORAGE_KEY);
         }
       }
       setLoading(false);
     });
     
-    const persistedProvider = localStorage.getItem(AUTH_PROVIDER_STORAGE_KEY) as AuthProviderType | 'google' | null;
+    const persistedProvider = typeof window !== 'undefined' ? localStorage.getItem(AUTH_PROVIDER_STORAGE_KEY) as AuthProviderType | 'google' | null : null;
     if (!persistedProvider && !storedGuestMode) { 
         setLoading(false); 
     }
@@ -140,8 +139,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setCurrentUser(appUser);
     setCurrentProvider(provider);
     setIsGuest(false);
-    localStorage.setItem(AUTH_PROVIDER_STORAGE_KEY, provider);
-    localStorage.removeItem(GUEST_MODE_STORAGE_KEY);
+    if (typeof window !== 'undefined') {
+        localStorage.setItem(AUTH_PROVIDER_STORAGE_KEY, provider);
+        localStorage.removeItem(GUEST_MODE_STORAGE_KEY);
+    }
     router.push('/');
   };
 
@@ -149,8 +150,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setCurrentUser(appUser); 
     setCurrentProvider(provider);
     setIsGuest(false);
-    localStorage.setItem(AUTH_PROVIDER_STORAGE_KEY, provider);
-    localStorage.removeItem(GUEST_MODE_STORAGE_KEY);
+    if (typeof window !== 'undefined') {
+        localStorage.setItem(AUTH_PROVIDER_STORAGE_KEY, provider);
+        localStorage.removeItem(GUEST_MODE_STORAGE_KEY);
+    }
     router.push('/');
   };
 
@@ -170,7 +173,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return appUser;
     } catch (error) {
       const authError = error as FirebaseAuthError;
-      toast({ title: 'Firebase Signup Failed', description: authError.message, variant: 'destructive' });
+      if (authError.code === 'auth/email-already-in-use') {
+        toast({ 
+          title: 'Firebase Signup Failed', 
+          description: 'This email address is already in use. Please log in or use a different email.', 
+          variant: 'destructive',
+          duration: 7000,
+        });
+      } else {
+        toast({ title: 'Firebase Signup Failed', description: authError.message, variant: 'destructive' });
+      }
       console.error('Firebase Signup error:', authError);
       return null;
     } finally {
@@ -207,17 +219,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return appUser;
     } catch (error) {
       const authError = error as FirebaseAuthError;
-      toast({ title: 'Google Sign-In Failed', description: authError.message, variant: 'destructive' });
-      console.error('Google Sign-In error:', authError);
-      // Specific error handling if needed (e.g., account-exists-with-different-credential)
+      
       if (authError.code === 'auth/account-exists-with-different-credential') {
         toast({
           title: 'Account Exists',
-          description: 'An account already exists with the same email address but different sign-in credentials. Try signing in with the original method.',
+          description: 'An account already exists with this email using a different sign-in method (e.g., email/password). Please sign in with that method.',
           variant: 'destructive',
-          duration: 7000,
+          duration: 8000,
         });
+      } else {
+        toast({ title: 'Google Sign-In Failed', description: authError.message, variant: 'destructive' });
       }
+      console.error('Google Sign-In error:', authError);
       return null;
     } finally {
       setLoading(false);
@@ -294,8 +307,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setCurrentUser(null);
       setCurrentProvider(null);
       setIsGuest(false);
-      localStorage.removeItem(AUTH_PROVIDER_STORAGE_KEY);
-      localStorage.removeItem(GUEST_MODE_STORAGE_KEY);
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem(AUTH_PROVIDER_STORAGE_KEY);
+        localStorage.removeItem(GUEST_MODE_STORAGE_KEY);
+      }
       setLoading(false);
       router.push('/login');
     }
@@ -305,14 +320,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setCurrentUser(null);
     setCurrentProvider(null);
     setIsGuest(true);
-    localStorage.setItem(GUEST_MODE_STORAGE_KEY, 'true');
-    localStorage.removeItem(AUTH_PROVIDER_STORAGE_KEY); 
+    if (typeof window !== 'undefined') {
+        localStorage.setItem(GUEST_MODE_STORAGE_KEY, 'true');
+        localStorage.removeItem(AUTH_PROVIDER_STORAGE_KEY); 
+    }
     router.push('/');
   }, [router]);
 
   const exitGuestMode = useCallback(() => {
     setIsGuest(false);
-    localStorage.removeItem(GUEST_MODE_STORAGE_KEY);
+    if (typeof window !== 'undefined') {
+        localStorage.removeItem(GUEST_MODE_STORAGE_KEY);
+    }
     router.push('/login');
   }, [router]);
 
@@ -323,7 +342,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     isGuest,
     signupWithFirebase,
     loginWithFirebase,
-    signInWithGoogleFirebase, // Add to context value
+    signInWithGoogleFirebase,
     signupWithSupabase,
     loginWithSupabase,
     logout,
