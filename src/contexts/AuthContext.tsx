@@ -1,4 +1,3 @@
-
 // src/contexts/AuthContext.tsx
 'use client';
 
@@ -16,7 +15,7 @@ import {
   GoogleAuthProvider,
   signInWithPopup
 } from 'firebase/auth';
-import { doc, getDoc, setDoc, serverTimestamp, Timestamp } from 'firebase/firestore'; // Firestore imports
+import { doc, getDoc, setDoc, updateDoc, serverTimestamp, Timestamp } from 'firebase/firestore'; // Firestore imports
 import { useToast } from '@/hooks/use-toast';
 import { useRouter } from 'next/navigation';
 import type { Board, Task, Column } from '@/types'; // Ensure types are available
@@ -131,26 +130,81 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const initializeFirestoreUserData = async (appUser: AppUser) => {
     const userDocRef = doc(db, 'users', appUser.id);
+    console.log(`Initializing Firestore data for user: ${appUser.id} (Email: ${appUser.email}, Provider: ${appUser.provider})`);
     try {
       const userDocSnap = await getDoc(userDocRef);
+      const defaultBoard = getDefaultBoardForNewUser();
+
       if (!userDocSnap.exists()) {
-        // User document doesn't exist, create it with default data
+        console.log(`User document for ${appUser.id} does not exist. Creating with defaults.`);
         await setDoc(userDocRef, {
           email: appUser.email,
           displayName: appUser.displayName,
-          createdAt: serverTimestamp() as Timestamp, // Use server timestamp for creation
-          boards: [getDefaultBoardForNewUser()],
-          activeBoardId: getDefaultBoardForNewUser().id,
+          photoURL: appUser.photoURL || null,
+          provider: appUser.provider,
+          createdAt: serverTimestamp() as Timestamp,
+          lastLogin: serverTimestamp() as Timestamp,
+          boards: [defaultBoard],
+          activeBoardId: defaultBoard.id,
           settings: defaultUserSettings,
           aiChatHistory: defaultAiChatHistory,
         });
-        console.log(`Firestore document created for new user: ${appUser.id}`);
+        console.log(`Firestore document CREATED for new user: ${appUser.id}`);
+        toast({ title: 'Welcome!', description: 'Your account has been set up.' });
       } else {
-        console.log(`Firestore document already exists for user: ${appUser.id}`);
+        console.log(`User document for ${appUser.id} exists. Checking/Updating fields.`);
+        const userData = userDocSnap.data();
+        const updates: Record<string, any> = { lastLogin: serverTimestamp() as Timestamp };
+        let needsUpdate = false;
+
+        if (!userData.boards || userData.boards.length === 0) {
+          updates.boards = [defaultBoard];
+          updates.activeBoardId = defaultBoard.id; // Ensure activeBoardId is set if boards are new
+          needsUpdate = true;
+          console.log(`User ${appUser.id} missing boards or has empty boards array. Adding default board.`);
+        }
+        if (!userData.settings) {
+          updates.settings = defaultUserSettings;
+          needsUpdate = true;
+          console.log(`User ${appUser.id} missing settings. Adding default settings.`);
+        }
+        if (!userData.aiChatHistory) {
+          updates.aiChatHistory = defaultAiChatHistory;
+          needsUpdate = true;
+          console.log(`User ${appUser.id} missing AI chat history. Adding default history.`);
+        }
+        
+        // Update essential user info if changed from auth provider
+        if (appUser.email && userData.email !== appUser.email) {
+            updates.email = appUser.email;
+            needsUpdate = true;
+        }
+        if (appUser.displayName && userData.displayName !== appUser.displayName) {
+            updates.displayName = appUser.displayName;
+            needsUpdate = true;
+        }
+        if (appUser.photoURL !== undefined && userData.photoURL !== appUser.photoURL) { // Check undefined to allow setting null
+            updates.photoURL = appUser.photoURL || null;
+            needsUpdate = true;
+        }
+        if(userData.provider !== appUser.provider) {
+            updates.provider = appUser.provider;
+            needsUpdate = true;
+        }
+
+        if (needsUpdate) {
+          console.log(`Updating existing user document for ${appUser.id} with:`, Object.keys(updates));
+          await updateDoc(userDocRef, updates);
+          console.log(`Firestore document UPDATED for user: ${appUser.id}`);
+        } else {
+          // Even if no other updates, always update lastLogin
+          console.log(`No major updates needed for ${appUser.id}. Updating lastLogin.`);
+          await updateDoc(userDocRef, { lastLogin: serverTimestamp() as Timestamp });
+        }
       }
     } catch (error) {
-      console.error("Error initializing Firestore user data:", error);
-      toast({ title: 'Data Sync Error', description: 'Could not initialize user data.', variant: 'destructive' });
+      console.error(`Error initializing/updating Firestore user data for ${appUser.id}:`, error);
+      toast({ title: 'Data Sync Error', description: `Could not initialize/update user data. Details: ${error instanceof Error ? error.message : String(error)}`, variant: 'destructive', duration: 10000 });
     }
   };
 
@@ -164,18 +218,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setCurrentUser(null);
       setCurrentProvider(null);
       setLoading(false);
+      console.log("Auth: Guest mode active from localStorage.");
       return; 
     }
 
+    console.log("Auth: Setting up Firebase and Supabase auth listeners.");
     const unsubscribeFirebase = onFirebaseAuthStateChanged(firebaseAuth, async (firebaseUser) => {
+      console.log("Auth: Firebase onAuthStateChanged triggered. User:", firebaseUser ? firebaseUser.uid : 'null');
       if (firebaseUser && !isGuest) { 
         const isGoogleSignIn = firebaseUser.providerData.some(pd => pd.providerId === GoogleAuthProvider.PROVIDER_ID);
         const appUser = mapFirebaseUserToAppUser(firebaseUser, isGoogleSignIn ? 'google' : undefined);
+        console.log("Auth: Firebase user identified:", appUser);
         setCurrentUser(appUser);
         setCurrentProvider(isGoogleSignIn ? 'google' : 'firebase');
         if (typeof window !== 'undefined') localStorage.setItem(AUTH_PROVIDER_STORAGE_KEY, isGoogleSignIn ? 'google' : 'firebase');
-        await initializeFirestoreUserData(appUser); // Initialize Firestore data
+        await initializeFirestoreUserData(appUser); 
       } else if (typeof window !== 'undefined' && (localStorage.getItem(AUTH_PROVIDER_STORAGE_KEY) === 'firebase' || localStorage.getItem(AUTH_PROVIDER_STORAGE_KEY) === 'google')) { 
+        console.log("Auth: Firebase user logged out or no user, clearing Firebase session.");
         setCurrentUser(null);
         setCurrentProvider(null);
        if (typeof window !== 'undefined') localStorage.removeItem(AUTH_PROVIDER_STORAGE_KEY);
@@ -184,16 +243,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
 
     const { data: { subscription: supabaseAuthSubscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      console.log("Auth: Supabase onAuthStateChange triggered. Event:", event, "Session:", session ? session.user.id : 'null');
       setLoading(true); 
       if (!isGuest) { 
         const supabaseUser = session?.user;
         if (supabaseUser) {
           const appUser = mapSupabaseUserToAppUser(supabaseUser);
+          console.log("Auth: Supabase user identified:", appUser);
           setCurrentUser(appUser);
           setCurrentProvider('supabase');
           if (typeof window !== 'undefined') localStorage.setItem(AUTH_PROVIDER_STORAGE_KEY, 'supabase');
-          await initializeFirestoreUserData(appUser); // Initialize Firestore data
+          await initializeFirestoreUserData(appUser); 
         } else if (typeof window !== 'undefined' && localStorage.getItem(AUTH_PROVIDER_STORAGE_KEY) === 'supabase') {
+          console.log("Auth: Supabase user logged out or no session, clearing Supabase session.");
           setCurrentUser(null);
           setCurrentProvider(null);
           if (typeof window !== 'undefined') localStorage.removeItem(AUTH_PROVIDER_STORAGE_KEY);
@@ -204,17 +266,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     
     const persistedProvider = typeof window !== 'undefined' ? localStorage.getItem(AUTH_PROVIDER_STORAGE_KEY) as AuthProviderType | 'google' | null : null;
     if (!persistedProvider && !storedGuestMode) { 
+        console.log("Auth: No persisted provider and not in guest mode. Initial load complete.");
         setLoading(false); 
     }
 
 
     return () => {
+      console.log("Auth: Unsubscribing auth listeners.");
       unsubscribeFirebase();
       supabaseAuthSubscription?.unsubscribe();
     };
   }, [isGuest]); 
 
   const commonLoginSuccess = async (appUser: AppUser, provider: AuthProviderType | 'google') => {
+    console.log(`Auth: Common login success for user ${appUser.id} via ${provider}`);
     setCurrentUser(appUser);
     setCurrentProvider(provider);
     setIsGuest(false);
@@ -222,11 +287,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         localStorage.setItem(AUTH_PROVIDER_STORAGE_KEY, provider);
         localStorage.removeItem(GUEST_MODE_STORAGE_KEY);
     }
-    await initializeFirestoreUserData(appUser); // Ensure data is initialized on login too
+    await initializeFirestoreUserData(appUser); 
     router.push('/');
   };
 
   const commonSignupSuccess = async (appUser: AppUser, provider: AuthProviderType | 'google') => {
+    console.log(`Auth: Common signup success for user ${appUser.id} via ${provider}`);
     setCurrentUser(appUser); 
     setCurrentProvider(provider);
     setIsGuest(false);
@@ -234,13 +300,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         localStorage.setItem(AUTH_PROVIDER_STORAGE_KEY, provider);
         localStorage.removeItem(GUEST_MODE_STORAGE_KEY);
     }
-    await initializeFirestoreUserData(appUser); // This will create the doc for new users
+    await initializeFirestoreUserData(appUser); 
     router.push('/');
   };
 
 
   const signupWithFirebase = async (email: string, password: string): Promise<AppUser | null> => {
     setLoading(true);
+    console.log(`Auth: Attempting Firebase signup for ${email}`);
     try {
       const userCredential = await createUserWithFirebase(firebaseAuth, email, password);
       const displayName = email.split('@')[0];
@@ -264,7 +331,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } else {
         toast({ title: 'Firebase Signup Failed', description: authError.message, variant: 'destructive' });
       }
-      console.error('Firebase Signup error:', authError);
+      console.error('Firebase Signup error:', authError.code, authError.message);
       return null;
     } finally {
       setLoading(false);
@@ -273,6 +340,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const loginWithFirebase = async (email: string, password: string): Promise<AppUser | null> => {
     setLoading(true);
+    console.log(`Auth: Attempting Firebase login for ${email}`);
     try {
       const userCredential = await signInWithFirebase(firebaseAuth, email, password);
       const appUser = mapFirebaseUserToAppUser(userCredential.user);
@@ -282,7 +350,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       const authError = error as FirebaseAuthError;
       toast({ title: 'Firebase Login Failed', description: authError.message, variant: 'destructive' });
-      console.error('Firebase Login error:', authError);
+      console.error('Firebase Login error:', authError.code, authError.message);
       return null;
     } finally {
       setLoading(false);
@@ -291,6 +359,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signInWithGoogleFirebase = async (): Promise<AppUser | null> => {
     setLoading(true);
+    console.log(`Auth: Attempting Google Sign-In`);
     const provider = new GoogleAuthProvider();
     try {
       const result = await signInWithPopup(firebaseAuth, provider);
@@ -311,7 +380,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } else {
         toast({ title: 'Google Sign-In Failed', description: authError.message, variant: 'destructive' });
       }
-      console.error('Google Sign-In error:', authError);
+      console.error('Google Sign-In error:', authError.code, authError.message);
       return null;
     } finally {
       setLoading(false);
@@ -321,6 +390,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signupWithSupabase = async (email: string, password: string): Promise<AppUser | null> => {
     setLoading(true);
+    console.log(`Auth: Attempting Supabase signup for ${email}`);
     try {
       const { data, error } = await supabase.auth.signUp({
         email,
@@ -341,7 +411,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       const authError = error as SupabaseAuthError;
       toast({ title: 'Supabase Signup Failed', description: authError.message, variant: 'destructive' });
-      console.error('Supabase Signup error:', authError);
+      console.error('Supabase Signup error:', authError.message);
       return null;
     } finally {
       setLoading(false);
@@ -350,6 +420,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const loginWithSupabase = async (email: string, password: string): Promise<AppUser | null> => {
     setLoading(true);
+    console.log(`Auth: Attempting Supabase login for ${email}`);
     try {
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
@@ -362,7 +433,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       const authError = error as SupabaseAuthError;
       toast({ title: 'Supabase Login Failed', description: authError.message, variant: 'destructive' });
-      console.error('Supabase Login error:', authError);
+      console.error('Supabase Login error:', authError.message);
       return null;
     } finally {
       setLoading(false);
@@ -372,6 +443,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = async () => {
     setLoading(true);
     const providerToLogout = currentProvider; 
+    console.log(`Auth: Logging out user from ${providerToLogout || 'guest session'}`);
     try {
       if (providerToLogout === 'firebase' || providerToLogout === 'google') {
         await signOutFirebase(firebaseAuth);
@@ -383,7 +455,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       const authError = error as FirebaseAuthError | SupabaseAuthError;
       toast({ title: 'Logout Failed', description: authError.message, variant: 'destructive' });
-      console.error('Logout error:', authError);
+      console.error('Logout error:', authError.message);
     } finally {
       setCurrentUser(null);
       setCurrentProvider(null);
@@ -398,6 +470,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const enterGuestMode = useCallback(() => {
+    console.log("Auth: Entering guest mode.");
     setCurrentUser(null);
     setCurrentProvider(null);
     setIsGuest(true);
@@ -409,11 +482,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [router]);
 
   const exitGuestMode = useCallback(() => {
+    console.log("Auth: Exiting guest mode.");
     setIsGuest(false);
     if (typeof window !== 'undefined') {
         localStorage.removeItem(GUEST_MODE_STORAGE_KEY);
     }
-    router.push('/login');
+    // CurrentUser should already be null, provider null.
+    // The useEffect will then try to re-evaluate auth state.
+    router.push('/login'); 
   }, [router]);
 
   const value = {
