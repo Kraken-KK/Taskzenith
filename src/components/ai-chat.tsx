@@ -1,13 +1,13 @@
 
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { Send, Bot, User, AlertTriangle } from 'lucide-react';
+import { Send, Bot, User, AlertTriangle, Loader2 } from 'lucide-react'; // Added Loader2
 import { Skeleton } from '@/components/ui/skeleton';
 import { 
   chatWithAI, 
@@ -21,9 +21,12 @@ import {
 } from '@/ai/flows/chat-flow';
 import { useTasks } from '@/contexts/TaskContext';
 import { useSettings } from '@/contexts/SettingsContext';
+import { useAuth } from '@/contexts/AuthContext'; // Import useAuth
+import { db } from '@/lib/firebase'; // Import db
+import { doc, getDoc, updateDoc, setDoc } from 'firebase/firestore'; // Firestore imports
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
-import type { Task, Column } from '@/types'; // Ensure Column is imported
+import type { Task, Column } from '@/types'; 
 
 interface DisplayMessage {
   id: string;
@@ -32,16 +35,89 @@ interface DisplayMessage {
   timestamp: number;
 }
 
+const MAX_HISTORY_LENGTH = 20; // Keep last 20 messages for AI context
+
 export function AiChat() {
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(true);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const { getActiveBoard, updateTask, moveTask } = useTasks();
-  const { interactionStyle, setInteractionStyle } = useSettings();
+  const { interactionStyle, setInteractionStyle: setSettingsInteractionStyle } = useSettings();
+  const { currentUser, isGuest } = useAuth(); // Get user status
   const { toast } = useToast();
+
+  // Load chat history from Firestore for logged-in users
+  useEffect(() => {
+    const loadChatHistory = async () => {
+      if (currentUser && !isGuest) {
+        setIsLoadingHistory(true);
+        const userDocRef = doc(db, 'users', currentUser.id);
+        try {
+          const userDocSnap = await getDoc(userDocRef);
+          if (userDocSnap.exists()) {
+            const userData = userDocSnap.data();
+            if (userData.aiChatHistory && userData.aiChatHistory.messages) {
+              const firestoreMessages = userData.aiChatHistory.messages as MessageHistoryItem[];
+              // Convert Firestore messages to DisplayMessage format
+              const displayMessages: DisplayMessage[] = firestoreMessages.map((msg, index) => ({
+                id: `hist-${index}-${Date.now()}`, // Generate a display ID
+                sender: msg.role === 'user' ? 'user' : 'ai',
+                text: msg.parts[0]?.text || '',
+                timestamp: Date.now() - (firestoreMessages.length - index) * 1000 // Approximate timestamp
+              }));
+              setMessages(displayMessages);
+            }
+          }
+        } catch (error) {
+          console.error("Error loading chat history:", error);
+          toast({ title: "Chat History Error", description: "Could not load previous chat messages.", variant: "destructive" });
+        } finally {
+          setIsLoadingHistory(false);
+        }
+      } else {
+        setIsLoadingHistory(false); // No history for guests or if not logged in
+      }
+    };
+    loadChatHistory();
+  }, [currentUser, isGuest, toast]);
+
+  // Save chat history to Firestore for logged-in users
+  const saveChatHistory = useCallback(async (currentDisplayMessages: DisplayMessage[]) => {
+    if (currentUser && !isGuest && currentDisplayMessages.length > 0) {
+      const userDocRef = doc(db, 'users', currentUser.id);
+      // Convert DisplayMessages back to MessageHistoryItem for Firestore
+      const historyForFirestore: MessageHistoryItem[] = currentDisplayMessages
+        .filter(msg => msg.sender === 'user' || msg.sender === 'ai') // Only save user and AI messages
+        .slice(-MAX_HISTORY_LENGTH * 2) // Keep a reasonable amount of full history for storage, AI gets less
+        .map(msg => ({
+          role: msg.sender === 'user' ? 'user' : 'model',
+          parts: [{ text: typeof msg.text === 'string' ? msg.text : 'Structured AI Message' }]
+        }));
+      
+      try {
+        // Check if user document exists, create if not (should be handled by AuthContext, but as a fallback)
+        const userDocSnap = await getDoc(userDocRef);
+        if (userDocSnap.exists()) {
+            await updateDoc(userDocRef, { 
+                'aiChatHistory.messages': historyForFirestore 
+            });
+        } else {
+            // This is a fallback, user doc should ideally exist.
+            await setDoc(userDocRef, { 
+                aiChatHistory: { messages: historyForFirestore } 
+            }, { merge: true });
+        }
+      } catch (error) {
+        console.error("Error saving chat history:", error);
+        // Don't toast every time, could be annoying. Log is sufficient.
+      }
+    }
+  }, [currentUser, isGuest]);
+
 
   useEffect(() => {
     if (scrollAreaRef.current) {
@@ -64,7 +140,7 @@ export function AiChat() {
       col.tasks.map(task => ({
         id: task.id,
         content: task.content,
-        statusTitle: col.title, // Use column title as statusTitle
+        statusTitle: col.title, 
         priority: task.priority,
         deadline: task.deadline,
       }))
@@ -84,12 +160,11 @@ export function AiChat() {
       return;
     }
 
-    // Find task by content (simple match for now)
     let foundTask: Task | undefined;
     let sourceColumn: Column | undefined;
 
     for (const col of activeBoard.columns) {
-      foundTask = col.tasks.find(t => t.content.toLowerCase() === action.taskIdentifier.toLowerCase());
+      foundTask = col.tasks.find(t => t.content.toLowerCase() === action.taskIdentifier.toLowerCase() || t.id === action.taskIdentifier);
       if (foundTask) {
         sourceColumn = col;
         break;
@@ -98,7 +173,7 @@ export function AiChat() {
 
     if (!foundTask || !sourceColumn) {
       toast({ title: "Task Not Found", description: `Could not find task: "${action.taskIdentifier}".`, variant: "destructive" });
-      addSystemMessage(`I couldn't find the task "${action.taskIdentifier}" on your board. Could you be more specific or check the task name?`);
+      addSystemMessage(`I couldn't find the task "${action.taskIdentifier}" on your board. Could you be more specific or check the task name/ID?`);
       return;
     }
 
@@ -128,7 +203,7 @@ export function AiChat() {
 
   const handlePreferenceUpdate = (update: PreferenceUpdate) => {
     if (update.type === 'interactionStyle' && update.styleValue) {
-      setInteractionStyle(update.styleValue);
+      setSettingsInteractionStyle(update.styleValue); // Use the setter from SettingsContext
       toast({ title: "Interaction Style Updated", description: `Jack will now be more ${update.styleValue}.` });
       addSystemMessage(`Okay, I've updated my interaction style to be more ${update.styleValue}.`);
     }
@@ -157,8 +232,8 @@ export function AiChat() {
       timestamp: Date.now(),
     };
 
-    const currentMessagesForHistory = [...messages, userMessage];
-    setMessages(currentMessagesForHistory);
+    const updatedMessages = [...messages, userMessage];
+    setMessages(updatedMessages);
     setInputValue('');
     setIsLoading(true);
 
@@ -168,17 +243,17 @@ export function AiChat() {
         sender: 'ai',
         text: (
             <div className="flex items-center space-x-2">
-                <Skeleton className="h-3 w-3 rounded-full bg-muted-foreground/30 animate-pulse" />
-                <Skeleton className="h-3 w-3 rounded-full bg-muted-foreground/30 animate-pulse delay-100" />
-                <Skeleton className="h-3 w-3 rounded-full bg-muted-foreground/30 animate-pulse delay-200" />
+                <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                <span className="text-sm text-muted-foreground">Jack is thinking...</span>
             </div>
         ),
         timestamp: Date.now(),
     }
     setMessages((prev) => [...prev, thinkingMessage]);
 
-    const historyForAI: MessageHistoryItem[] = currentMessagesForHistory
-      .filter(msg => msg.id !== thinkingMessageId && msg.sender !== 'system') 
+    const historyForAI: MessageHistoryItem[] = updatedMessages
+      .filter(msg => msg.id !== thinkingMessageId && (msg.sender === 'user' || msg.sender === 'ai')) 
+      .slice(-MAX_HISTORY_LENGTH) // Send only the last N messages to AI
       .map(msg => ({
         role: msg.sender === 'user' ? 'user' : 'model',
         parts: [{ text: typeof msg.text === 'string' ? msg.text : 'System message or UI element.' }]
@@ -186,7 +261,7 @@ export function AiChat() {
     
     const aiInput: ChatInput = { 
       query: trimmedInput, 
-      history: historyForAI.slice(0, -1), // History before current query
+      history: historyForAI.slice(0, -1), 
       activeBoardContext: prepareBoardContext(),
       userPreferences: prepareUserPreferences(),
     };
@@ -200,7 +275,16 @@ export function AiChat() {
         text: aiResponse.response,
         timestamp: Date.now(),
       };
-      setMessages((prev) => prev.map(msg => msg.id === thinkingMessageId ? aiMessage : msg));
+      
+      const finalMessages = updatedMessages.map(msg => msg.id === thinkingMessageId ? aiMessage : msg);
+      if(!updatedMessages.find(m => m.id === thinkingMessageId)){ // if thinking message was removed by fast reply
+          finalMessages.push(aiMessage);
+      } else {
+         finalMessages.splice(finalMessages.findIndex(m => m.id === thinkingMessageId), 1, aiMessage);
+      }
+      
+      setMessages(finalMessages);
+      await saveChatHistory(finalMessages); // Save history after AI response
 
       if (aiResponse.taskAction) {
         handleTaskAction(aiResponse.taskAction);
@@ -223,14 +307,31 @@ export function AiChat() {
         timestamp: Date.now(),
       };
       setMessages((prev) => prev.map(msg => msg.id === thinkingMessageId ? errorDisplayMessage : msg));
+      await saveChatHistory(messages.map(msg => msg.id === thinkingMessageId ? errorDisplayMessage : msg));
     } finally {
       setIsLoading(false);
       inputRef.current?.focus();
     }
   };
 
+  if (isLoadingHistory) {
+    return (
+      <Card className="flex flex-col h-full max-h-[calc(100vh-10rem)] w-full shadow-2xl overflow-hidden rounded-xl">
+        <CardHeader className="border-b bg-card/80 backdrop-blur-md">
+          <CardTitle className="flex items-center gap-2 text-lg font-semibold">
+            <Bot className="h-6 w-6 text-primary" /> AI Assistant (Jack)
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="flex-1 p-4 flex items-center justify-center">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          <p className="ml-2 text-muted-foreground">Loading chat history...</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
-    <Card className="flex flex-col h-full max-h-[calc(100vh-10rem)] w-full max-w-3xl mx-auto shadow-2xl overflow-hidden rounded-xl">
+    <Card className="flex flex-col h-full max-h-[calc(100vh-10rem)] w-full shadow-2xl overflow-hidden rounded-xl">
       <CardHeader className="border-b bg-card/80 backdrop-blur-md">
         <CardTitle className="flex items-center gap-2 text-lg font-semibold">
           <Bot className="h-6 w-6 text-primary" /> AI Assistant (Jack)
@@ -264,7 +365,7 @@ export function AiChat() {
                 {message.sender !== 'system' && (
                     <div
                     className={cn(
-                        'max-w-[80%] rounded-2xl p-3.5 text-sm shadow-lg transition-all duration-300 ease-in-out hover:shadow-xl hover:scale-[1.02]',
+                        'max-w-[80%] rounded-2xl p-3.5 text-sm shadow-lg transition-all duration-300 ease-in-out hover:shadow-xl hover:scale-[1.01]',
                         message.sender === 'user'
                         ? 'bg-primary text-primary-foreground rounded-br-lg' 
                         : 'bg-muted text-muted-foreground rounded-bl-lg dark:bg-neutral-700 dark:text-neutral-100'
@@ -284,6 +385,19 @@ export function AiChat() {
                 )}
               </div>
             ))}
+             {isLoading && messages.length > 0 && messages[messages.length -1].sender !== 'ai' &&  ( // Show thinking indicator if last message isn't AI and loading
+                <div className="flex items-end gap-3 justify-start animate-fadeInUp">
+                     <Avatar className="h-9 w-9 border-2 border-primary/50 shadow-md">
+                         <AvatarFallback className="bg-primary/10"><Bot className="h-5 w-5 text-primary" /></AvatarFallback>
+                     </Avatar>
+                     <div className="max-w-[80%] rounded-2xl p-3.5 text-sm shadow-lg bg-muted text-muted-foreground rounded-bl-lg dark:bg-neutral-700 dark:text-neutral-100">
+                        <div className="flex items-center space-x-2">
+                            <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                            <span className="text-sm text-muted-foreground">Jack is thinking...</span>
+                        </div>
+                     </div>
+                </div>
+            )}
           </div>
         </ScrollArea>
       </CardContent>

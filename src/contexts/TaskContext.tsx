@@ -7,39 +7,40 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 import { useToast } from "@/hooks/use-toast";
 import { formatISO } from 'date-fns';
 import { useAuth } from './AuthContext'; 
+import { db } from '@/lib/firebase';
+import { doc, getDoc, updateDoc, setDoc } from 'firebase/firestore';
 
 // Helper to generate unique IDs
 const generateId = (prefix: string = 'id') => `${prefix}-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
 
-// Initial placeholder data for a single board's columns
-const getDefaultColumns = (): Column[] => [
+// Initial placeholder data for a single board's columns for guest
+const getDefaultColumnsForGuest = (): Column[] => [
   {
-    id: generateId('col'),
+    id: generateId('col-guest'),
     title: 'To Do',
     tasks: [
-      { id: generateId('task'), content: 'Design the user interface mockup', status: '', priority: 'high', deadline: '2024-08-15', description: 'Create mockups for the main board and task details.', tags: ['design', 'UI'], checklist: [{id: generateId('cl'), text: 'Research color palettes', completed: true}, {id: generateId('cl'), text: 'Sketch wireframes', completed: false}], dependencies: [], createdAt: formatISO(new Date()) },
-      { id: generateId('task'), content: 'Set up the project structure', status: '', priority: 'medium', description: 'Initialize Next.js, install dependencies, configure Tailwind.', tags: ['dev', 'setup'], checklist: [], dependencies: [], createdAt: formatISO(new Date()) },
+      { id: generateId('task-guest'), content: 'Design the user interface mockup', status: '', priority: 'high', deadline: '2024-08-15', description: 'Create mockups for the main board and task details.', tags: ['design', 'UI'], checklist: [{id: generateId('cl-guest'), text: 'Research color palettes', completed: true}, {id: generateId('cl-guest'), text: 'Sketch wireframes', completed: false}], dependencies: [], createdAt: formatISO(new Date()) },
+      { id: generateId('task-guest'), content: 'Set up the project structure', status: '', priority: 'medium', description: 'Initialize Next.js, install dependencies, configure Tailwind.', tags: ['dev', 'setup'], checklist: [], dependencies: [], createdAt: formatISO(new Date()) },
     ],
     wipLimit: 5,
   },
   {
-    id: generateId('col'),
+    id: generateId('col-guest'),
     title: 'In Progress',
     tasks: [
-      { id: generateId('task'), content: 'Develop the Kanban board component', status: '', priority: 'high', description: 'Build the main drag-and-drop interface.', tags: ['dev', 'kanban'], checklist: [], dependencies: [], createdAt: formatISO(new Date()) },
+      { id: generateId('task-guest'), content: 'Develop the Kanban board component', status: '', priority: 'high', description: 'Build the main drag-and-drop interface.', tags: ['dev', 'kanban'], checklist: [], dependencies: [], createdAt: formatISO(new Date()) },
     ],
     wipLimit: 3,
   },
   {
-    id: generateId('col'),
+    id: generateId('col-guest'),
     title: 'Done',
     tasks: [
-      { id: generateId('task'), content: 'Gather project requirements', status: '', description: 'Define features and user stories.', tags: ['planning'], checklist: [], dependencies: [], createdAt: formatISO(new Date()) },
+      { id: generateId('task-guest'), content: 'Gather project requirements', status: '', description: 'Define features and user stories.', tags: ['planning'], checklist: [], dependencies: [], createdAt: formatISO(new Date()) },
     ],
   },
 ];
 
-// Assign initial status to tasks for default columns
 const assignTaskStatusToColumns = (columns: Column[]): Column[] => {
   return columns.map(col => ({
     ...col,
@@ -54,19 +55,10 @@ const assignTaskStatusToColumns = (columns: Column[]): Column[] => {
   }));
 };
 
-
-const initialDefaultBoardForUser = (userId: string, provider: string): Board => ({
-  id: generateId(`board-${provider}-${userId}`),
-  name: 'My First Board',
-  columns: assignTaskStatusToColumns(getDefaultColumns()),
-  createdAt: formatISO(new Date()),
-  theme: {}, 
-});
-
 const initialDefaultBoardForGuest = (): Board => ({
-    id: generateId('board-guest'),
+    id: generateId('board-guest-main'),
     name: 'Guest Board',
-    columns: assignTaskStatusToColumns(getDefaultColumns()),
+    columns: assignTaskStatusToColumns(getDefaultColumnsForGuest()),
     createdAt: formatISO(new Date()),
     theme: {},
 });
@@ -103,99 +95,181 @@ interface TaskContextType {
 const TaskContext = createContext<TaskContextType | undefined>(undefined);
 
 export function TaskProvider({ children }: { children: ReactNode }) {
-  const auth = useAuth(); 
+  const { currentUser, isGuest, loading: authLoading } = useAuth(); 
   const [boards, setBoards] = useState<Board[]>([]);
   const [activeBoardId, setActiveBoardIdState] = useState<string | null>(null);
   const { toast } = useToast();
-
-  const getStorageKey = useCallback((baseKey: string) => {
-    if (auth.isGuest) {
-      return `${baseKey}-guestSession`;
-    }
-    if (auth.currentUser) {
-      return `${baseKey}-${auth.currentUser.provider}-${auth.currentUser.id}`;
-    }
-    return null; 
-  }, [auth.currentUser, auth.isGuest]);
+  const [isLoadingData, setIsLoadingData] = useState(true);
 
 
+  // Load data from Firestore for logged-in user or localStorage for guest
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const boardsKey = getStorageKey('kanbanBoards');
-      const activeIdKey = getStorageKey('activeKanbanBoardId');
+    const loadData = async () => {
+      setIsLoadingData(true);
+      if (authLoading) return; // Wait for auth state to be resolved
 
-      if (boardsKey) { // User is logged in or is a guest
-        const savedBoards = localStorage.getItem(boardsKey);
+      if (currentUser && !isGuest) { // Logged-in user
+        const userDocRef = doc(db, 'users', currentUser.id);
+        try {
+          const userDocSnap = await getDoc(userDocRef);
+          if (userDocSnap.exists()) {
+            const userData = userDocSnap.data();
+            const firestoreBoards = (userData.boards || []) as Board[];
+            // Ensure all boards and tasks have necessary fields and structure
+             const sanitizedBoards = firestoreBoards.map(board => ({
+                ...board,
+                id: board.id || generateId('board-fb'),
+                name: board.name || 'Untitled Board',
+                columns: Array.isArray(board.columns) ? assignTaskStatusToColumns(board.columns.map(col => ({
+                    ...col,
+                    id: col.id || generateId('col-fb'),
+                    title: col.title || 'Untitled Column',
+                    tasks: Array.isArray(col.tasks) ? col.tasks.map(task => ({
+                        ...task,
+                        id: task.id || generateId('task-fb'),
+                        content: task.content || 'Untitled Task',
+                        status: col.id || '',
+                        priority: task.priority || 'medium',
+                        createdAt: task.createdAt || formatISO(new Date()),
+                        checklist: task.checklist || [],
+                        dependencies: task.dependencies || [],
+                        tags: task.tags || [],
+                    })) : [],
+                }))) : [],
+                createdAt: board.createdAt || formatISO(new Date()),
+                theme: board.theme || {},
+            }));
+
+            setBoards(sanitizedBoards);
+
+            const firestoreActiveBoardId = userData.activeBoardId as string | null;
+            if (firestoreActiveBoardId && sanitizedBoards.find(b => b.id === firestoreActiveBoardId)) {
+              setActiveBoardIdState(firestoreActiveBoardId);
+            } else if (sanitizedBoards.length > 0) {
+              setActiveBoardIdState(sanitizedBoards[0].id);
+              // If activeId was invalid, update it in Firestore too
+              if (firestoreActiveBoardId !== sanitizedBoards[0].id) {
+                await updateDoc(userDocRef, { activeBoardId: sanitizedBoards[0].id });
+              }
+            } else {
+              setActiveBoardIdState(null);
+            }
+          } else {
+            // This case should ideally be handled by AuthContext creating the user doc
+            // For safety, initialize here if somehow missed
+            console.warn("User document not found in TaskContext, AuthContext should have created it.");
+            setBoards([]); // Or set default board and save it
+            setActiveBoardIdState(null);
+          }
+        } catch (error) {
+          console.error("Error loading user data from Firestore:", error);
+          toast({ title: "Data Load Error", description: "Could not load your board data.", variant: "destructive" });
+          setBoards([]);
+          setActiveBoardIdState(null);
+        }
+      } else if (isGuest) { // Guest user
+        const guestBoardsKey = 'kanbanBoards-guestSession';
+        const guestActiveIdKey = 'activeKanbanBoardId-guestSession';
+        const savedBoards = localStorage.getItem(guestBoardsKey);
         if (savedBoards) {
           try {
             const parsed = JSON.parse(savedBoards) as Board[];
-            if (Array.isArray(parsed) && parsed.every(b => b.id && b.name && Array.isArray(b.columns))) {
-              parsed.forEach(board => {
-                board.columns = assignTaskStatusToColumns(board.columns); // Ensure tasks have status
-                board.createdAt = board.createdAt || formatISO(new Date());
-                board.theme = board.theme || {};
-              });
-              setBoards(parsed);
+             const sanitizedBoards = parsed.map(board => ({
+                ...board,
+                id: board.id || generateId('board-guest-parsed'),
+                name: board.name || 'Untitled Guest Board',
+                columns: Array.isArray(board.columns) ? assignTaskStatusToColumns(board.columns.map(col => ({
+                    ...col,
+                    id: col.id || generateId('col-guest-parsed'),
+                    title: col.title || 'Untitled Guest Column',
+                    tasks: Array.isArray(col.tasks) ? col.tasks.map(task => ({
+                        ...task,
+                        id: task.id || generateId('task-guest-parsed'),
+                        content: task.content || 'Untitled Guest Task',
+                        status: col.id || '',
+                        priority: task.priority || 'medium',
+                        createdAt: task.createdAt || formatISO(new Date()),
+                         checklist: task.checklist || [],
+                        dependencies: task.dependencies || [],
+                        tags: task.tags || [],
+                    })) : [],
+                }))) : [],
+                createdAt: board.createdAt || formatISO(new Date()),
+                theme: board.theme || {},
+            }));
+            setBoards(sanitizedBoards);
 
-              if (activeIdKey) {
-                const savedActiveId = localStorage.getItem(activeIdKey);
-                if (savedActiveId && parsed.find(b => b.id === savedActiveId)) {
-                  setActiveBoardIdState(savedActiveId);
-                } else if (parsed.length > 0) {
-                  setActiveBoardIdState(parsed[0].id);
-                } else {
-                  setActiveBoardIdState(null);
-                }
-              } else if (parsed.length > 0) { // If no activeIdKey but boards exist
-                  setActiveBoardIdState(parsed[0].id);
-              }
-
-            } else { // Data is malformed
-                const defaultBoard = auth.isGuest ? initialDefaultBoardForGuest() : initialDefaultBoardForUser(auth.currentUser!.id, auth.currentUser!.provider);
-                setBoards([defaultBoard]);
-                setActiveBoardIdState(defaultBoard.id);
+            const savedActiveId = localStorage.getItem(guestActiveIdKey);
+            if (savedActiveId && sanitizedBoards.find(b => b.id === savedActiveId)) {
+              setActiveBoardIdState(savedActiveId);
+            } else if (sanitizedBoards.length > 0) {
+              setActiveBoardIdState(sanitizedBoards[0].id);
+            } else {
+               const defaultGuestBoard = initialDefaultBoardForGuest();
+               setBoards([defaultGuestBoard]);
+               setActiveBoardIdState(defaultGuestBoard.id);
             }
           } catch (e) {
-            console.error("Failed to parse boards from localStorage", e);
-            const defaultBoard = auth.isGuest ? initialDefaultBoardForGuest() : initialDefaultBoardForUser(auth.currentUser!.id, auth.currentUser!.provider);
-            setBoards([defaultBoard]);
-            setActiveBoardIdState(defaultBoard.id);
+            console.error("Failed to parse guest boards from localStorage", e);
+            const defaultGuestBoard = initialDefaultBoardForGuest();
+            setBoards([defaultGuestBoard]);
+            setActiveBoardIdState(defaultGuestBoard.id);
           }
-        } else { // No saved boards for this user/guest, initialize
-          const defaultBoard = auth.isGuest ? initialDefaultBoardForGuest() : initialDefaultBoardForUser(auth.currentUser!.id, auth.currentUser!.provider);
-          setBoards([defaultBoard]);
-          setActiveBoardIdState(defaultBoard.id);
+        } else {
+          const defaultGuestBoard = initialDefaultBoardForGuest();
+          setBoards([defaultGuestBoard]);
+          setActiveBoardIdState(defaultGuestBoard.id);
         }
-      } else { // Not logged in and not guest, clear state
+      } else { // No user, not guest
         setBoards([]);
         setActiveBoardIdState(null);
       }
-    }
-  }, [auth.currentUser, auth.isGuest, getStorageKey]);
+      setIsLoadingData(false);
+    };
 
+    loadData();
+  }, [currentUser, isGuest, authLoading, toast]);
 
+  // Save data to Firestore for logged-in user or localStorage for guest
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const key = getStorageKey('kanbanBoards');
-      if (key) { // Only save if we have a valid key (user or guest)
-        localStorage.setItem(key, JSON.stringify(boards));
-      }
-    }
-  }, [boards, getStorageKey]);
+    if (isLoadingData || authLoading) return; // Don't save while initially loading or auth is pending
 
-
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const key = getStorageKey('activeKanbanBoardId');
-      if (key) {
+    const saveData = async () => {
+      if (currentUser && !isGuest) { // Logged-in user
+        const userDocRef = doc(db, 'users', currentUser.id);
+        try {
+          // Ensure boards are structured correctly before saving
+           const boardsToSave = boards.map(board => ({
+            ...board,
+            columns: board.columns.map(column => ({
+              ...column,
+              tasks: column.tasks.map(task => ({
+                ...task,
+                checklist: task.checklist || [],
+                dependencies: task.dependencies || [],
+                tags: task.tags || [],
+                createdAt: task.createdAt || formatISO(new Date()),
+              }))
+            }))
+          }));
+          await updateDoc(userDocRef, { boards: boardsToSave, activeBoardId });
+        } catch (error) {
+          console.error("Error saving user data to Firestore:", error);
+          // toast({ title: "Data Save Error", description: "Could not save your changes to the cloud.", variant: "destructive" });
+        }
+      } else if (isGuest) { // Guest user
+        const guestBoardsKey = 'kanbanBoards-guestSession';
+        const guestActiveIdKey = 'activeKanbanBoardId-guestSession';
+        localStorage.setItem(guestBoardsKey, JSON.stringify(boards));
         if (activeBoardId) {
-          localStorage.setItem(key, activeBoardId);
+          localStorage.setItem(guestActiveIdKey, activeBoardId);
         } else {
-          localStorage.removeItem(key); // Remove if activeBoardId is null but key exists
+          localStorage.removeItem(guestActiveIdKey);
         }
       }
-    }
-  }, [activeBoardId, getStorageKey]);
+    };
+    saveData();
+  }, [boards, activeBoardId, currentUser, isGuest, isLoadingData, authLoading, toast]);
   
   const setActiveBoardId = useCallback((boardId: string | null) => {
     setActiveBoardIdState(boardId);
@@ -206,29 +280,33 @@ export function TaskProvider({ children }: { children: ReactNode }) {
   }, [boards, activeBoardId]);
 
   const addBoard = (name: string): Board | undefined => {
-    if (!auth.currentUser && !auth.isGuest) {
+    if (!currentUser && !isGuest) {
         toast({ title: "Action Denied", description: "You must be logged in or in guest mode to add a board.", variant: "destructive"});
         return undefined;
     }
-    const newBoardId = auth.isGuest ? generateId('board-guest') : generateId(`board-${auth.currentUser!.provider}-${auth.currentUser!.id}`);
+    const newBoardId = isGuest ? generateId('board-guest') : generateId(`board-user`);
     const newBoard: Board = {
       id: newBoardId,
       name,
-      columns: assignTaskStatusToColumns(getDefaultColumns()),
+      columns: assignTaskStatusToColumns([
+        { id: generateId('col'), title: 'To Do', tasks: [], wipLimit: 0 },
+        { id: generateId('col'), title: 'In Progress', tasks: [], wipLimit: 0 },
+        { id: generateId('col'), title: 'Done', tasks: [], wipLimit: 0 },
+      ]),
       createdAt: formatISO(new Date()),
       theme: {},
     };
     setBoards(prevBoards => [...prevBoards, newBoard]);
-    setActiveBoardId(newBoard.id);
+    setActiveBoardId(newBoard.id); // Set new board as active
     toast({ title: "Board Created", description: `Board "${name}" has been created.`});
     return newBoard;
   };
 
   const deleteBoard = (boardId: string) => {
-    if (!auth.currentUser && !auth.isGuest) return;
+    if (!currentUser && !isGuest) return;
     setBoards(prevBoards => {
       const remainingBoards = prevBoards.filter(b => b.id !== boardId);
-      if (activeBoardId === boardId) {
+      if (activeBoardId === boardId) { // If deleted board was active
         setActiveBoardId(remainingBoards.length > 0 ? remainingBoards[0].id : null);
       }
       return remainingBoards;
@@ -237,7 +315,7 @@ export function TaskProvider({ children }: { children: ReactNode }) {
   };
 
   const updateBoardName = (boardId: string, newName: string) => {
-    if (!auth.currentUser && !auth.isGuest) return;
+    if (!currentUser && !isGuest) return;
     setBoards(prevBoards =>
       prevBoards.map(b => (b.id === boardId ? { ...b, name: newName } : b))
     );
@@ -245,7 +323,7 @@ export function TaskProvider({ children }: { children: ReactNode }) {
   };
   
   const updateBoardTheme = (boardId: string, themeUpdate: Partial<BoardTheme>) => {
-    if (!auth.currentUser && !auth.isGuest) return;
+    if (!currentUser && !isGuest) return;
     setBoards(prevBoards =>
       prevBoards.map(b =>
         b.id === boardId ? { ...b, theme: { ...(b.theme || {}), ...themeUpdate } } : b
@@ -255,22 +333,30 @@ export function TaskProvider({ children }: { children: ReactNode }) {
   };
 
   const executeOnActiveBoard = <T,>(operation: (board: Board) => { updatedBoard?: Board, result?: T }): T | undefined => {
-    if (!auth.currentUser && !auth.isGuest) {
-      toast({ title: "Action Denied", description: "Operation requires login or guest mode.", variant: "destructive"});
-      return undefined;
-    }
-    const currentActiveBoard = getActiveBoard();
-    if (!currentActiveBoard) {
-      toast({ title: "No Active Board", description: "Please select or create a board first.", variant: "destructive" });
+    if ((!currentUser && !isGuest) || !activeBoardId) {
+      toast({ title: "Action Denied", description: "Operation requires an active board and user/guest session.", variant: "destructive"});
       return undefined;
     }
     
-    const { updatedBoard, result } = operation(currentActiveBoard);
+    let resultFromOperation: T | undefined;
+    setBoards(prevBoards => {
+        const boardIndex = prevBoards.findIndex(b => b.id === activeBoardId);
+        if (boardIndex === -1) {
+            toast({ title: "Error", description: "Active board not found.", variant: "destructive"});
+            return prevBoards;
+        }
+        const currentActiveBoard = prevBoards[boardIndex];
+        const { updatedBoard, result } = operation(currentActiveBoard);
+        resultFromOperation = result;
 
-    if (updatedBoard) {
-      setBoards(prev => prev.map(b => b.id === currentActiveBoard.id ? updatedBoard : b));
-    }
-    return result;
+        if (updatedBoard) {
+            const newBoards = [...prevBoards];
+            newBoards[boardIndex] = updatedBoard;
+            return newBoards;
+        }
+        return prevBoards;
+    });
+    return resultFromOperation;
   };
 
   const addTask = (taskData: Omit<Task, 'id' | 'status' | 'createdAt'> & Partial<Pick<Task, 'dependencies' | 'checklist' | 'tags' | 'description' | 'deadline'>>, targetColumnIdInput?: Column['id']) => {
@@ -325,7 +411,7 @@ export function TaskProvider({ children }: { children: ReactNode }) {
             if (!item.completed) { item.completed = true; automationApplied = true; }
           });
         }
-        targetCol.tasks.push(movedTask);
+        targetCol.tasks.unshift(movedTask); // Add to the top of the target column
       }
       toast({ title: "Task Moved", description: `Task "${movedTask?.content}" moved to "${targetCol.title}".`});
       if (automationApplied) toast({ title: "Automation Applied", description: "Checklist items marked complete."});
@@ -413,7 +499,8 @@ export function TaskProvider({ children }: { children: ReactNode }) {
             ...col,
             tasks: col.tasks.map(task => {
               if (task.id === taskId) {
-                return { ...task, checklist: [...(task.checklist || []), { id: generateId('cl-item'), text: itemText, completed: false }]};
+                const newChecklist = [...(task.checklist || []), { id: generateId('cl-item'), text: itemText, completed: false }];
+                return { ...task, checklist: newChecklist};
               }
               return task;
             })
@@ -430,8 +517,9 @@ export function TaskProvider({ children }: { children: ReactNode }) {
         const updatedCols = board.columns.map(col => {
             if (col.id === columnId) {
                 return { ...col, tasks: col.tasks.map(task => {
-                    if (task.id === taskId) {
-                        return { ...task, checklist: task.checklist.map(item => item.id === itemId ? {...item, completed: !item.completed} : item)};
+                    if (task.id === taskId && task.checklist) {
+                        const newChecklist = task.checklist.map(item => item.id === itemId ? {...item, completed: !item.completed} : item);
+                        return { ...task, checklist: newChecklist};
                     }
                     return task;
                 })};
@@ -447,8 +535,9 @@ export function TaskProvider({ children }: { children: ReactNode }) {
         const updatedCols = board.columns.map(col => {
             if (col.id === columnId) {
                 return { ...col, tasks: col.tasks.map(task => {
-                    if (task.id === taskId) {
-                        return { ...task, checklist: task.checklist.filter(item => item.id !== itemId)};
+                    if (task.id === taskId && task.checklist) {
+                        const newChecklist = task.checklist.filter(item => item.id !== itemId);
+                        return { ...task, checklist: newChecklist};
                     }
                     return task;
                 })};
@@ -464,8 +553,9 @@ export function TaskProvider({ children }: { children: ReactNode }) {
         const updatedCols = board.columns.map(col => {
             if (col.id === columnId) {
                 return { ...col, tasks: col.tasks.map(task => {
-                    if (task.id === taskId) {
-                        return { ...task, checklist: task.checklist.map(item => item.id === itemId ? {...item, text: newText} : item)};
+                    if (task.id === taskId && task.checklist) {
+                        const newChecklist = task.checklist.map(item => item.id === itemId ? {...item, text: newText} : item);
+                        return { ...task, checklist: newChecklist};
                     }
                     return task;
                 })};
@@ -475,6 +565,25 @@ export function TaskProvider({ children }: { children: ReactNode }) {
         return { updatedBoard: { ...board, columns: updatedCols } };
      });
   };
+
+  if (isLoadingData || authLoading) {
+     return (
+      <TaskContext.Provider value={{ 
+        boards: [], activeBoardId: null, setActiveBoardId: () => {}, getActiveBoard: () => undefined, addBoard: () => undefined, deleteBoard: () => {}, updateBoardName: () => {}, updateBoardTheme: () => {},
+        addTask: () => {}, moveTask: () => ({task: null, automated: false }), deleteTask: () => {}, updateTask: () => {}, getTaskById: () => undefined, getAllTasksOfActiveBoard: () => [],
+        addColumn: () => {}, updateColumnTitle: () => {}, deleteColumn: () => {}, updateColumnWipLimit: () => {},
+        addChecklistItem: () => {}, toggleChecklistItem: () => {}, deleteChecklistItem: () => {}, updateChecklistItemText: () => {}
+      }}>
+        <div className="flex h-screen w-screen items-center justify-center bg-background">
+          <svg className="animate-spin h-12 w-12 text-primary" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+          </svg>
+        </div>
+      </TaskContext.Provider>
+    );
+  }
+
 
   return (
     <TaskContext.Provider value={{ 

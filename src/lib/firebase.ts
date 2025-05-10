@@ -1,7 +1,7 @@
 // src/lib/firebase.ts
 import { initializeApp, getApps, type FirebaseApp } from 'firebase/app';
 import { getAuth, type Auth } from 'firebase/auth';
-// import { getFirestore, type Firestore } from 'firebase/firestore'; // Uncomment if you need Firestore
+import { getFirestore, type Firestore } from 'firebase/firestore'; // Import Firestore
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -38,7 +38,7 @@ if (!getApps().length) {
 }
 
 const auth: Auth = getAuth(app);
-// const db: Firestore = getFirestore(app); // Uncomment if you need Firestore
+const db: Firestore = getFirestore(app); // Initialize Firestore
 
 // Developer Note: To enable Google Sign-In:
 // 1. Go to your Firebase project console.
@@ -55,4 +55,4 @@ const auth: Auth = getAuth(app);
 //    preview domain (e.g., `12345-port-3000-your-instance.cluster.cloudworkstations.dev`).
 //    Firebase needs to know which domains are allowed to initiate authentication requests.
 
-export { app, auth }; // Remove db if not used
+export { app, auth, db }; // Export db
