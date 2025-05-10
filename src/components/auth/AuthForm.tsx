@@ -10,9 +10,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Loader2, LogIn, UserPlus, Database, Zap } from 'lucide-react'; // Added Database and Zap icons
+import { Loader2, LogIn, UserPlus, Database, Zap, User } from 'lucide-react'; 
 import Link from 'next/link';
-import type { AuthProviderType } from '@/contexts/AuthContext';
+import { useAuth, type AuthProviderType } from '@/contexts/AuthContext';
 
 const authSchema = z.object({
   email: z.string().email({ message: 'Invalid email address.' }),
@@ -29,6 +29,7 @@ interface AuthFormProps {
 
 export function AuthForm({ mode, onSubmit, loading }: AuthFormProps) {
   const [selectedProvider, setSelectedProvider] = useState<AuthProviderType>('firebase');
+  const { enterGuestMode } = useAuth();
   const {
     register,
     handleSubmit,
@@ -41,16 +42,6 @@ export function AuthForm({ mode, onSubmit, loading }: AuthFormProps) {
 
   const internalOnSubmit: SubmitHandler<AuthFormValues> = async (data) => {
     await onSubmit(data, selectedProvider);
-  };
-
-  const renderProviderIcon = (provider: AuthProviderType) => {
-    if (provider === 'firebase') {
-      return <Database className="h-5 w-5 text-orange-400" />;
-    }
-    if (provider === 'supabase') {
-      return <Zap className="h-5 w-5 text-green-400" />;
-    }
-    return null;
   };
 
   return (
@@ -66,6 +57,7 @@ export function AuthForm({ mode, onSubmit, loading }: AuthFormProps) {
           <CardDescription>
             {isLoginMode ? 'Log in to access your TaskZenith dashboard.' : 'Sign up to start managing your tasks with AI.'}
             {!isLoginMode && ' Choose your preferred authentication provider below.'}
+            {' Or, continue as a guest to explore.'}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -79,8 +71,7 @@ export function AuthForm({ mode, onSubmit, loading }: AuthFormProps) {
               </TabsTrigger>
             </TabsList>
             
-            {/* Common form content for both providers */}
-            <TabsContent value="firebase" className="mt-0"> {/* Remove default top margin for TabsContent */}
+            <TabsContent value="firebase" className="mt-0"> 
                <form onSubmit={handleSubmit(internalOnSubmit)} className="space-y-6 pt-6">
                  <div className="space-y-2">
                    <Label htmlFor="email-firebase">Email Address</Label>
@@ -127,7 +118,7 @@ export function AuthForm({ mode, onSubmit, loading }: AuthFormProps) {
                     id="email-supabase"
                     type="email"
                     placeholder="you@example.com"
-                    {...register('email')} // Re-registering for this form instance, RHF handles it contextually.
+                    {...register('email')} 
                     className={errors.email ? 'border-destructive' : ''}
                     disabled={loading}
                   />
@@ -158,6 +149,19 @@ export function AuthForm({ mode, onSubmit, loading }: AuthFormProps) {
               </form>
             </TabsContent>
           </Tabs>
+          <div className="relative">
+            <div className="absolute inset-0 flex items-center">
+                <span className="w-full border-t" />
+            </div>
+            <div className="relative flex justify-center text-xs uppercase">
+                <span className="bg-background px-2 text-muted-foreground">
+                Or
+                </span>
+            </div>
+          </div>
+          <Button variant="outline" className="w-full text-lg py-6" onClick={enterGuestMode} disabled={loading}>
+            <User className="mr-2 h-5 w-5" /> Continue as Guest
+          </Button>
         </CardContent>
         <CardFooter className="flex flex-col items-center space-y-2">
           <p className="text-sm text-muted-foreground">
@@ -167,7 +171,7 @@ export function AuthForm({ mode, onSubmit, loading }: AuthFormProps) {
             </Link>
           </p>
            <Link href="/" className="text-xs text-muted-foreground hover:text-primary hover:underline">
-              Back to TaskZenith
+              Back to TaskZenith (Home)
             </Link>
         </CardFooter>
       </Card>

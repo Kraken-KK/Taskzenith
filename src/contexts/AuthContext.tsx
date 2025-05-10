@@ -3,7 +3,7 @@
 
 import type { User as FirebaseUser, AuthError as FirebaseAuthError } from 'firebase/auth';
 import type { User as SupabaseUser, AuthError as SupabaseAuthError, Session as SupabaseSession } from '@supabase/supabase-js';
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, type ReactNode, useCallback } from 'react';
 import { auth as firebaseAuth } from '@/lib/firebase';
 import { supabase } from '@/lib/supabaseClient';
 import { 
@@ -24,26 +24,37 @@ export interface AppUser {
   displayName: string | null;
   photoURL?: string | null;
   provider: AuthProviderType;
-  // You can add more common fields or provider-specific fields if needed
-  // e.g., firebaseUser?: FirebaseUser; supabaseUser?: SupabaseUser;
 }
 
 interface AuthContextType {
   currentUser: AppUser | null;
   loading: boolean;
   currentProvider: AuthProviderType | null;
+  isGuest: boolean;
   signupWithFirebase: (email: string, password: string) => Promise<AppUser | null>;
   loginWithFirebase: (email: string, password: string) => Promise<AppUser | null>;
   signupWithSupabase: (email: string, password: string) => Promise<AppUser | null>;
   loginWithSupabase: (email: string, password: string) => Promise<AppUser | null>;
   logout: () => Promise<void>;
+  enterGuestMode: () => void;
+  exitGuestMode: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+const GUEST_MODE_STORAGE_KEY = 'taskzenith-guest-mode';
+const AUTH_PROVIDER_STORAGE_KEY = 'taskzenith-auth-provider';
+
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUser] = useState<AppUser | null>(null);
   const [currentProvider, setCurrentProvider] = useState<AuthProviderType | null>(null);
+  const [isGuest, setIsGuest] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem(GUEST_MODE_STORAGE_KEY) === 'true';
+    }
+    return false;
+  });
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
   const router = useRouter();
@@ -66,46 +77,53 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     setLoading(true);
+    const storedGuestMode = localStorage.getItem(GUEST_MODE_STORAGE_KEY) === 'true';
+    setIsGuest(storedGuestMode);
+
+    if (storedGuestMode) {
+      setCurrentUser(null);
+      setCurrentProvider(null);
+      setLoading(false);
+      return; // Don't initialize Firebase/Supabase listeners if in guest mode initially
+    }
+
     // Firebase Auth State Listener
     const unsubscribeFirebase = onFirebaseAuthStateChanged(firebaseAuth, (firebaseUser) => {
-      if (firebaseUser) {
+      if (firebaseUser && !isGuest) { // Check !isGuest again in case it changed
         const appUser = mapFirebaseUserToAppUser(firebaseUser);
         setCurrentUser(appUser);
         setCurrentProvider('firebase');
-        localStorage.setItem('taskzenith-auth-provider', 'firebase');
-      } else if (currentProvider === 'firebase') { // Only clear if it was firebase auth
+        localStorage.setItem(AUTH_PROVIDER_STORAGE_KEY, 'firebase');
+      } else if (localStorage.getItem(AUTH_PROVIDER_STORAGE_KEY) === 'firebase') { 
         setCurrentUser(null);
         setCurrentProvider(null);
-        localStorage.removeItem('taskzenith-auth-provider');
+        localStorage.removeItem(AUTH_PROVIDER_STORAGE_KEY);
       }
-      setLoading(false); // Firebase is done, Supabase might still be checking
+      setLoading(false);
     });
 
     // Supabase Auth State Listener
     const { data: { subscription: supabaseAuthSubscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      setLoading(true);
-      const supabaseUser = session?.user;
-      if (supabaseUser) {
-        const appUser = mapSupabaseUserToAppUser(supabaseUser);
-        setCurrentUser(appUser);
-        setCurrentProvider('supabase');
-        localStorage.setItem('taskzenith-auth-provider', 'supabase');
-      } else if (currentProvider === 'supabase') { // Only clear if it was supabase auth
-        setCurrentUser(null);
-        setCurrentProvider(null);
-        localStorage.removeItem('taskzenith-auth-provider');
+      setLoading(true); // Set loading true at start of change
+      if (!isGuest) { // Check !isGuest again
+        const supabaseUser = session?.user;
+        if (supabaseUser) {
+          const appUser = mapSupabaseUserToAppUser(supabaseUser);
+          setCurrentUser(appUser);
+          setCurrentProvider('supabase');
+          localStorage.setItem(AUTH_PROVIDER_STORAGE_KEY, 'supabase');
+        } else if (localStorage.getItem(AUTH_PROVIDER_STORAGE_KEY) === 'supabase') {
+          setCurrentUser(null);
+          setCurrentProvider(null);
+          localStorage.removeItem(AUTH_PROVIDER_STORAGE_KEY);
+        }
       }
       setLoading(false);
     });
     
-    // Initial check for persisted provider preference
-    const persistedProvider = localStorage.getItem('taskzenith-auth-provider') as AuthProviderType | null;
-    if (persistedProvider) {
-        // If a provider was persisted, let its onAuthStateChanged handle user loading.
-        // This avoids a race condition or double-setting if both Firebase and Supabase have active sessions.
-        // For now, we assume only one can be active in the app's context at a time.
-    } else {
-        setLoading(false); // No persisted provider, so initial loading done.
+    const persistedProvider = localStorage.getItem(AUTH_PROVIDER_STORAGE_KEY) as AuthProviderType | null;
+    if (!persistedProvider && !storedGuestMode) { // if no provider and not guest
+        setLoading(false); 
     }
 
 
@@ -113,7 +131,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       unsubscribeFirebase();
       supabaseAuthSubscription?.unsubscribe();
     };
-  }, [currentProvider]); // Rerun if currentProvider changes externally (e.g. logout)
+  }, [isGuest]); // Rerun if isGuest changes
+
+  const commonLoginSuccess = (appUser: AppUser, provider: AuthProviderType) => {
+    setCurrentUser(appUser);
+    setCurrentProvider(provider);
+    setIsGuest(false);
+    localStorage.setItem(AUTH_PROVIDER_STORAGE_KEY, provider);
+    localStorage.removeItem(GUEST_MODE_STORAGE_KEY);
+  };
+
+  const commonSignupSuccess = (appUser: AppUser, provider: AuthProviderType) => {
+    setCurrentUser(appUser); // May be overridden by onAuthStateChange for Supabase confirmation
+    setCurrentProvider(provider);
+    setIsGuest(false);
+    localStorage.setItem(AUTH_PROVIDER_STORAGE_KEY, provider);
+    localStorage.removeItem(GUEST_MODE_STORAGE_KEY);
+  };
+
 
   const signupWithFirebase = async (email: string, password: string): Promise<AppUser | null> => {
     setLoading(true);
@@ -123,12 +158,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await updateFirebaseProfile(userCredential.user, { displayName });
       
       const appUser = mapFirebaseUserToAppUser(userCredential.user);
-      appUser.displayName = displayName; // Ensure displayName is set on our appUser
+      appUser.displayName = displayName; 
       
       toast({ title: 'Firebase Signup Successful', description: 'Welcome aboard!' });
-      setCurrentUser(appUser);
-      setCurrentProvider('firebase');
-      localStorage.setItem('taskzenith-auth-provider', 'firebase');
+      commonSignupSuccess(appUser, 'firebase');
       return appUser;
     } catch (error) {
       const authError = error as FirebaseAuthError;
@@ -146,9 +179,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const userCredential = await signInWithFirebase(firebaseAuth, email, password);
       const appUser = mapFirebaseUserToAppUser(userCredential.user);
       toast({ title: 'Firebase Login Successful', description: 'Welcome back!' });
-      setCurrentUser(appUser);
-      setCurrentProvider('firebase');
-      localStorage.setItem('taskzenith-auth-provider', 'firebase');
+      commonLoginSuccess(appUser, 'firebase');
       return appUser;
     } catch (error) {
       const authError = error as FirebaseAuthError;
@@ -168,7 +199,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         password,
         options: {
           data: {
-            displayName: email.split('@')[0] // Store display name in user_metadata
+            displayName: email.split('@')[0] 
           }
         }
       });
@@ -177,11 +208,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       const appUser = mapSupabaseUserToAppUser(data.user);
       toast({ title: 'Supabase Signup Successful', description: 'Please check your email to confirm registration!' });
-      // setCurrentUser(appUser); // User will be set by onAuthStateChange after email confirmation usually
-      // setCurrentProvider('supabase');
-      // localStorage.setItem('taskzenith-auth-provider', 'supabase');
-      // For Supabase, often email confirmation is needed. The onAuthStateChange will handle setting the user.
-      // We return the user data for immediate feedback if needed, but actual session might pend confirmation.
+      commonSignupSuccess(appUser, 'supabase'); // optimistic update
       return appUser;
     } catch (error) {
       const authError = error as SupabaseAuthError;
@@ -202,9 +229,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       
       const appUser = mapSupabaseUserToAppUser(data.user);
       toast({ title: 'Supabase Login Successful', description: 'Welcome back!' });
-      setCurrentUser(appUser); // Set by onAuthStateChange, but can set here for quicker UI update
-      setCurrentProvider('supabase');
-      localStorage.setItem('taskzenith-auth-provider', 'supabase');
+      commonLoginSuccess(appUser, 'supabase');
       return appUser;
     } catch (error) {
       const authError = error as SupabaseAuthError;
@@ -218,37 +243,59 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = async () => {
     setLoading(true);
-    const provider = currentProvider; // Use the state at the time of logout call
+    const providerToLogout = currentProvider; 
     try {
-      if (provider === 'firebase') {
+      if (providerToLogout === 'firebase') {
         await signOutFirebase(firebaseAuth);
-      } else if (provider === 'supabase') {
+      } else if (providerToLogout === 'supabase') {
         const { error } = await supabase.auth.signOut();
         if (error) throw error;
       }
       toast({ title: 'Logged Out', description: 'You have been successfully logged out.' });
-      setCurrentUser(null);
-      setCurrentProvider(null);
-      localStorage.removeItem('taskzenith-auth-provider');
-      router.push('/login');
     } catch (error) {
       const authError = error as FirebaseAuthError | SupabaseAuthError;
       toast({ title: 'Logout Failed', description: authError.message, variant: 'destructive' });
       console.error('Logout error:', authError);
     } finally {
+      setCurrentUser(null);
+      setCurrentProvider(null);
+      setIsGuest(false);
+      localStorage.removeItem(AUTH_PROVIDER_STORAGE_KEY);
+      localStorage.removeItem(GUEST_MODE_STORAGE_KEY);
       setLoading(false);
+      router.push('/login');
     }
   };
+
+  const enterGuestMode = useCallback(() => {
+    setCurrentUser(null);
+    setCurrentProvider(null);
+    setIsGuest(true);
+    localStorage.setItem(GUEST_MODE_STORAGE_KEY, 'true');
+    localStorage.removeItem(AUTH_PROVIDER_STORAGE_KEY); // Clear any lingering auth provider
+    router.push('/');
+  }, [router]);
+
+  const exitGuestMode = useCallback(() => {
+    setIsGuest(false);
+    localStorage.removeItem(GUEST_MODE_STORAGE_KEY);
+    // Optionally clear guest data here if TaskContext doesn't handle it.
+    // For now, TaskContext will switch keys.
+    router.push('/login');
+  }, [router]);
 
   const value = {
     currentUser,
     loading,
     currentProvider,
+    isGuest,
     signupWithFirebase,
     loginWithFirebase,
     signupWithSupabase,
     loginWithSupabase,
     logout,
+    enterGuestMode,
+    exitGuestMode,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

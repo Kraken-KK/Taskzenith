@@ -20,7 +20,7 @@ import { AiChat } from "@/components/ai-chat";
 import { SettingsView } from '@/components/settings-view';
 import { PrioritizeTasksView } from '@/components/prioritize-tasks-view';
 import { SmartTaskCreationView } from '@/components/smart-task-creation-view';
-import { Bot, CheckSquare, ListTodo, Settings, Star, Menu, FolderKanban, PlusCircle, Edit3, Trash2, Palette, LogOut, Database, Zap } from "lucide-react";
+import { Bot, CheckSquare, ListTodo, Settings, Star, Menu, FolderKanban, PlusCircle, Edit3, Trash2, Palette, LogOut, Database, Zap, User } from "lucide-react";
 import { useSidebar } from '@/components/ui/sidebar';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -58,7 +58,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 type ActiveView = 'board' | 'ai-assistant' | 'prioritize' | 'smart-create' | 'settings';
 
 export default function Home() {
-  const { currentUser, loading: authLoading, logout, currentProvider } = useAuth();
+  const { currentUser, loading: authLoading, logout, currentProvider, isGuest, exitGuestMode } = useAuth();
   const router = useRouter();
   const [activeView, setActiveView] = useState<ActiveView>('board');
   const { isMobile } = useSidebar();
@@ -73,20 +73,21 @@ export default function Home() {
 
 
   useEffect(() => {
-    if (!authLoading && !currentUser) {
+    if (!authLoading && !currentUser && !isGuest) {
       router.push('/login');
     }
-  }, [currentUser, authLoading, router]);
+  }, [currentUser, authLoading, isGuest, router]);
 
   // Effect to ensure an active board is selected if possible
   useEffect(() => {
-    if (currentUser && !activeBoardId && boards.length > 0) { // Ensure currentUser exists before trying to set active board
+    // This logic should apply to both logged-in users and guests
+    if ((currentUser || isGuest) && !activeBoardId && boards.length > 0) { 
       setActiveBoardId(boards[0].id);
     }
-  }, [activeBoardId, boards, setActiveBoardId, currentUser]);
+  }, [activeBoardId, boards, setActiveBoardId, currentUser, isGuest]);
 
 
-  if (authLoading || !currentUser) {
+  if (authLoading || (!currentUser && !isGuest)) { // Show loader if auth is loading OR if not logged in and not a guest
     return (
       <div className="flex h-screen w-screen items-center justify-center bg-background">
         <svg className="animate-spin h-12 w-12 text-primary" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -134,7 +135,7 @@ export default function Home() {
     if (currentUser?.email) {
       return currentUser.email.charAt(0).toUpperCase();
     }
-    return "U";
+    return "G"; // Guest
   }
   
   const getProviderIcon = () => {
@@ -179,6 +180,7 @@ export default function Home() {
                         <SidebarMenuButton
                             tooltip="My Boards"
                             className="w-full hover:bg-sidebar-accent/80 dark:hover:bg-sidebar-accent/50"
+                            disabled={authLoading && !currentUser && !isGuest} // Disable if loading and no user/guest yet
                         >
                             <FolderKanban />
                             My Boards
@@ -253,6 +255,7 @@ export default function Home() {
                     setActiveView('board');
                   }}
                   className="hover:bg-sidebar-accent/80 dark:hover:bg-sidebar-accent/50"
+                  disabled={authLoading && !currentUser && !isGuest}
                >
                   <ListTodo />
                   Board
@@ -264,6 +267,7 @@ export default function Home() {
                   isActive={activeView === 'ai-assistant'}
                   onClick={() => setActiveView('ai-assistant')}
                   className="hover:bg-sidebar-accent/80 dark:hover:bg-sidebar-accent/50"
+                  disabled={authLoading && !currentUser && !isGuest}
                 >
                   <Bot />
                   AI Assistant
@@ -275,6 +279,7 @@ export default function Home() {
                   isActive={activeView === 'prioritize'}
                   onClick={() => setActiveView('prioritize')}
                   className="hover:bg-sidebar-accent/80 dark:hover:bg-sidebar-accent/50"
+                  disabled={authLoading && !currentUser && !isGuest}
                 >
                   <Star />
                   Prioritize Tasks
@@ -286,6 +291,7 @@ export default function Home() {
                   isActive={activeView === 'smart-create'}
                   onClick={() => setActiveView('smart-create')}
                   className="hover:bg-sidebar-accent/80 dark:hover:bg-sidebar-accent/50"
+                  disabled={authLoading && !currentUser && !isGuest}
                 >
                   <CheckSquare />
                   Smart Task Creation
@@ -301,6 +307,7 @@ export default function Home() {
                   isActive={activeView === 'settings'}
                   onClick={() => setActiveView('settings')}
                   className="hover:bg-sidebar-accent/80 dark:hover:bg-sidebar-accent/50"
+                  disabled={authLoading && !currentUser && !isGuest}
                 >
                   <Settings />
                   Settings
@@ -308,15 +315,16 @@ export default function Home() {
              </SidebarMenuItem>
               <SidebarMenuItem>
                 <SidebarMenuButton
-                  tooltip="Logout"
-                  onClick={logout}
+                  tooltip={isGuest ? "Exit Guest Mode & Login" : "Logout"}
+                  onClick={isGuest ? exitGuestMode : logout}
                   className="hover:bg-destructive/20 dark:hover:bg-destructive/30 text-destructive dark:text-red-400"
+                  disabled={authLoading}
                 >
                   <LogOut />
-                  Logout
+                  {isGuest ? "Exit Guest Mode" : "Logout"}
                 </SidebarMenuButton>
               </SidebarMenuItem>
-              {currentUser && (
+              {currentUser && !isGuest && (
                 <div className="p-2 mt-2 group-data-[collapsible=icon]:hidden">
                   <div className="flex items-center gap-2">
                     <Avatar className="h-9 w-9">
@@ -329,6 +337,19 @@ export default function Home() {
                         {getProviderIcon()}
                       </p>
                       <p className="text-xs text-muted-foreground">{currentUser.email}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+              {isGuest && (
+                 <div className="p-2 mt-2 group-data-[collapsible=icon]:hidden">
+                  <div className="flex items-center gap-2">
+                    <Avatar className="h-9 w-9">
+                      <AvatarFallback className="bg-muted text-muted-foreground"><User className="h-5 w-5"/></AvatarFallback>
+                    </Avatar>
+                    <div>
+                      <p className="text-sm font-medium text-sidebar-foreground">Guest User</p>
+                      <p className="text-xs text-muted-foreground">Exploring TaskZenith</p>
                     </div>
                   </div>
                 </div>

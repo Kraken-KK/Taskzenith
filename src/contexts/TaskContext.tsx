@@ -6,7 +6,7 @@ import type { ReactNode } from 'react';
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { useToast } from "@/hooks/use-toast";
 import { formatISO } from 'date-fns';
-import { useAuth } from './AuthContext'; // Import useAuth
+import { useAuth } from './AuthContext'; 
 
 // Helper to generate unique IDs
 const generateId = (prefix: string = 'id') => `${prefix}-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
@@ -60,7 +60,15 @@ const initialDefaultBoardForUser = (userId: string, provider: string): Board => 
   name: 'My First Board',
   columns: assignTaskStatusToColumns(getDefaultColumns()),
   createdAt: formatISO(new Date()),
-  theme: {}, // Default empty theme
+  theme: {}, 
+});
+
+const initialDefaultBoardForGuest = (): Board => ({
+    id: generateId('board-guest'),
+    name: 'Guest Board',
+    columns: assignTaskStatusToColumns(getDefaultColumns()),
+    createdAt: formatISO(new Date()),
+    theme: {},
 });
 
 
@@ -95,32 +103,35 @@ interface TaskContextType {
 const TaskContext = createContext<TaskContextType | undefined>(undefined);
 
 export function TaskProvider({ children }: { children: ReactNode }) {
-  const { currentUser } = useAuth(); // Get currentUser for namespacing
+  const auth = useAuth(); 
   const [boards, setBoards] = useState<Board[]>([]);
   const [activeBoardId, setActiveBoardIdState] = useState<string | null>(null);
   const { toast } = useToast();
 
   const getStorageKey = useCallback((baseKey: string) => {
-    if (currentUser) {
-      return `${baseKey}-${currentUser.provider}-${currentUser.id}`;
+    if (auth.isGuest) {
+      return `${baseKey}-guestSession`;
     }
-    return null; // No user, no storage
-  }, [currentUser]);
+    if (auth.currentUser) {
+      return `${baseKey}-${auth.currentUser.provider}-${auth.currentUser.id}`;
+    }
+    return null; 
+  }, [auth.currentUser, auth.isGuest]);
 
-  // Load boards and activeBoardId from localStorage on user change
+
   useEffect(() => {
-    if (typeof window !== 'undefined' && currentUser) {
+    if (typeof window !== 'undefined') {
       const boardsKey = getStorageKey('kanbanBoards');
       const activeIdKey = getStorageKey('activeKanbanBoardId');
 
-      if (boardsKey) {
+      if (boardsKey) { // User is logged in or is a guest
         const savedBoards = localStorage.getItem(boardsKey);
         if (savedBoards) {
           try {
             const parsed = JSON.parse(savedBoards) as Board[];
             if (Array.isArray(parsed) && parsed.every(b => b.id && b.name && Array.isArray(b.columns))) {
               parsed.forEach(board => {
-                board.columns = assignTaskStatusToColumns(board.columns);
+                board.columns = assignTaskStatusToColumns(board.columns); // Ensure tasks have status
                 board.createdAt = board.createdAt || formatISO(new Date());
                 board.theme = board.theme || {};
               });
@@ -135,57 +146,56 @@ export function TaskProvider({ children }: { children: ReactNode }) {
                 } else {
                   setActiveBoardIdState(null);
                 }
+              } else if (parsed.length > 0) { // If no activeIdKey but boards exist
+                  setActiveBoardIdState(parsed[0].id);
               }
 
-            } else { // Data is malformed, initialize
-                const defaultBoard = initialDefaultBoardForUser(currentUser.id, currentUser.provider);
+            } else { // Data is malformed
+                const defaultBoard = auth.isGuest ? initialDefaultBoardForGuest() : initialDefaultBoardForUser(auth.currentUser!.id, auth.currentUser!.provider);
                 setBoards([defaultBoard]);
                 setActiveBoardIdState(defaultBoard.id);
             }
           } catch (e) {
             console.error("Failed to parse boards from localStorage", e);
-            const defaultBoard = initialDefaultBoardForUser(currentUser.id, currentUser.provider);
+            const defaultBoard = auth.isGuest ? initialDefaultBoardForGuest() : initialDefaultBoardForUser(auth.currentUser!.id, auth.currentUser!.provider);
             setBoards([defaultBoard]);
             setActiveBoardIdState(defaultBoard.id);
           }
-        } else { // No saved boards for this user, initialize
-          const defaultBoard = initialDefaultBoardForUser(currentUser.id, currentUser.provider);
+        } else { // No saved boards for this user/guest, initialize
+          const defaultBoard = auth.isGuest ? initialDefaultBoardForGuest() : initialDefaultBoardForUser(auth.currentUser!.id, auth.currentUser!.provider);
           setBoards([defaultBoard]);
           setActiveBoardIdState(defaultBoard.id);
         }
+      } else { // Not logged in and not guest, clear state
+        setBoards([]);
+        setActiveBoardIdState(null);
       }
-    } else if (!currentUser) { // User logged out, clear state
-      setBoards([]);
-      setActiveBoardIdState(null);
     }
-  }, [currentUser, getStorageKey]);
+  }, [auth.currentUser, auth.isGuest, getStorageKey]);
 
 
-  // Save boards to localStorage
   useEffect(() => {
-    if (typeof window !== 'undefined' && currentUser) {
+    if (typeof window !== 'undefined') {
       const key = getStorageKey('kanbanBoards');
-      if (key && boards.length > 0) { // Only save if there are boards, to avoid overwriting with empty on logout flash
+      if (key) { // Only save if we have a valid key (user or guest)
         localStorage.setItem(key, JSON.stringify(boards));
-      } else if (key && boards.length === 0 && currentUser) { // If user is logged in and boards are intentionally empty
-        localStorage.setItem(key, JSON.stringify([]));
       }
     }
-  }, [boards, currentUser, getStorageKey]);
+  }, [boards, getStorageKey]);
 
-  // Save activeBoardId to localStorage
+
   useEffect(() => {
-    if (typeof window !== 'undefined' && currentUser) {
+    if (typeof window !== 'undefined') {
       const key = getStorageKey('activeKanbanBoardId');
       if (key) {
         if (activeBoardId) {
           localStorage.setItem(key, activeBoardId);
         } else {
-          localStorage.removeItem(key);
+          localStorage.removeItem(key); // Remove if activeBoardId is null but key exists
         }
       }
     }
-  }, [activeBoardId, currentUser, getStorageKey]);
+  }, [activeBoardId, getStorageKey]);
   
   const setActiveBoardId = useCallback((boardId: string | null) => {
     setActiveBoardIdState(boardId);
@@ -196,12 +206,13 @@ export function TaskProvider({ children }: { children: ReactNode }) {
   }, [boards, activeBoardId]);
 
   const addBoard = (name: string): Board | undefined => {
-    if (!currentUser) {
-        toast({ title: "Not Authenticated", description: "You must be logged in to add a board.", variant: "destructive"});
+    if (!auth.currentUser && !auth.isGuest) {
+        toast({ title: "Action Denied", description: "You must be logged in or in guest mode to add a board.", variant: "destructive"});
         return undefined;
     }
+    const newBoardId = auth.isGuest ? generateId('board-guest') : generateId(`board-${auth.currentUser!.provider}-${auth.currentUser!.id}`);
     const newBoard: Board = {
-      id: generateId(`board-${currentUser.provider}-${currentUser.id}`),
+      id: newBoardId,
       name,
       columns: assignTaskStatusToColumns(getDefaultColumns()),
       createdAt: formatISO(new Date()),
@@ -214,7 +225,7 @@ export function TaskProvider({ children }: { children: ReactNode }) {
   };
 
   const deleteBoard = (boardId: string) => {
-    if (!currentUser) return;
+    if (!auth.currentUser && !auth.isGuest) return;
     setBoards(prevBoards => {
       const remainingBoards = prevBoards.filter(b => b.id !== boardId);
       if (activeBoardId === boardId) {
@@ -226,7 +237,7 @@ export function TaskProvider({ children }: { children: ReactNode }) {
   };
 
   const updateBoardName = (boardId: string, newName: string) => {
-    if (!currentUser) return;
+    if (!auth.currentUser && !auth.isGuest) return;
     setBoards(prevBoards =>
       prevBoards.map(b => (b.id === boardId ? { ...b, name: newName } : b))
     );
@@ -234,7 +245,7 @@ export function TaskProvider({ children }: { children: ReactNode }) {
   };
   
   const updateBoardTheme = (boardId: string, themeUpdate: Partial<BoardTheme>) => {
-    if (!currentUser) return;
+    if (!auth.currentUser && !auth.isGuest) return;
     setBoards(prevBoards =>
       prevBoards.map(b =>
         b.id === boardId ? { ...b, theme: { ...(b.theme || {}), ...themeUpdate } } : b
@@ -244,8 +255,8 @@ export function TaskProvider({ children }: { children: ReactNode }) {
   };
 
   const executeOnActiveBoard = <T,>(operation: (board: Board) => { updatedBoard?: Board, result?: T }): T | undefined => {
-    if (!currentUser) {
-      toast({ title: "Not Authenticated", description: "Action requires login.", variant: "destructive"});
+    if (!auth.currentUser && !auth.isGuest) {
+      toast({ title: "Action Denied", description: "Operation requires login or guest mode.", variant: "destructive"});
       return undefined;
     }
     const currentActiveBoard = getActiveBoard();
@@ -331,6 +342,7 @@ export function TaskProvider({ children }: { children: ReactNode }) {
         }
         return col;
       });
+      toast({ title: "Task Deleted" });
       return { updatedBoard: { ...board, columns: updatedBoardColumns } };
     });
   };

@@ -8,14 +8,14 @@ import type { FC } from 'react';
 import { useEffect } from 'react';
 
 const LoginPage: FC = () => {
-  const { loginWithFirebase, loginWithSupabase, currentUser, loading: authLoading } = useAuth();
+  const { loginWithFirebase, loginWithSupabase, currentUser, loading: authLoading, isGuest } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
-    if (!authLoading && currentUser) {
-      router.push('/'); // Redirect if already logged in
+    if (!authLoading && (currentUser || isGuest)) {
+      router.push('/'); // Redirect if already logged in or in guest mode
     }
-  }, [currentUser, authLoading, router]);
+  }, [currentUser, authLoading, isGuest, router]);
 
   const handleLogin = async (data: { email: string; password: string }, provider: AuthProviderType) => {
     let user = null;
@@ -30,7 +30,7 @@ const LoginPage: FC = () => {
     }
   };
 
-  if (authLoading || (!authLoading && currentUser)) {
+  if (authLoading || (!authLoading && (currentUser || isGuest))) {
     return (
       <div className="flex h-screen w-screen items-center justify-center bg-background">
         <svg className="animate-spin h-10 w-10 text-primary" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">

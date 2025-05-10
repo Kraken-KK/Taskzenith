@@ -10,15 +10,15 @@ import { useToast } from '@/hooks/use-toast';
 
 
 const SignupPage: FC = () => {
-  const { signupWithFirebase, signupWithSupabase, currentUser, loading: authLoading } = useAuth();
+  const { signupWithFirebase, signupWithSupabase, currentUser, loading: authLoading, isGuest } = useAuth();
   const router = useRouter();
   const { toast } = useToast();
 
   useEffect(() => {
-    if (!authLoading && currentUser) {
-      router.push('/'); // Redirect if already logged in
+    if (!authLoading && (currentUser || isGuest)) {
+      router.push('/'); // Redirect if already logged in or in guest mode
     }
-  }, [currentUser, authLoading, router]);
+  }, [currentUser, authLoading, isGuest, router]);
 
   const handleSignup = async (data: { email: string; password: string }, provider: AuthProviderType) => {
     let user = null;
@@ -26,22 +26,27 @@ const SignupPage: FC = () => {
       user = await signupWithFirebase(data.email, data.password);
     } else if (provider === 'supabase') {
       user = await signupWithSupabase(data.email, data.password);
-      if (user) { // For Supabase, redirect to login after signup due to email confirmation usually
+      if (user) { 
         toast({
           title: "Signup Initiated",
           description: "Please check your email to confirm your Supabase account, then log in.",
         });
-        router.push('/login');
-        return; // Don't proceed to home page yet for Supabase
+        // For Supabase, user is often redirected after confirmation via email link.
+        // If auto-confirmation is off, they'll need to login after confirming.
+        // Explicitly pushing to login page might be redundant if onAuthStateChange handles it.
+        // Let's keep it simple, successful signup here (even pending confirmation) means they can go to home.
+        // If confirmation is strict, onAuthStateChange will eventually log them out if not confirmed.
+        // router.push('/login'); 
+        // return; 
       }
     }
     
-    if (user) { // Firebase user or Supabase if auto-confirmed (rare)
+    if (user) { 
       router.push('/');
     }
   };
 
-  if (authLoading || (!authLoading && currentUser)) {
+  if (authLoading || (!authLoading && (currentUser || isGuest))) {
     return (
       <div className="flex h-screen w-screen items-center justify-center bg-background">
         <svg className="animate-spin h-10 w-10 text-primary" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
