@@ -46,7 +46,13 @@ const auth: Auth = getAuth(app);
 // 3. Select the "Sign-in method" tab.
 // 4. Find "Google" in the list of providers and enable it.
 // 5. You may need to provide a project support email.
-// For web applications, this is typically all that's needed. If you plan to build Android/iOS apps,
-// you'll also need to configure SHA-1 fingerprints (for Android) or URL schemes (for iOS).
+// 6. **IMPORTANT for `auth/unauthorized-domain` errors:**
+//    Under the "Sign-in method" tab, in the "Authorized domains" section,
+//    ensure that the domain from which you are trying to sign in is listed.
+//    During development, this is often `localhost`. If you are deploying,
+//    add your deployment domain (e.g., `your-app-name.web.app`, `your-custom-domain.com`).
+//    If using Google Cloud Workstations or similar preview environments, add the specific
+//    preview domain (e.g., `12345-port-3000-your-instance.cluster.cloudworkstations.dev`).
+//    Firebase needs to know which domains are allowed to initiate authentication requests.
 
 export { app, auth }; // Remove db if not used
