@@ -1,3 +1,4 @@
+
 // src/contexts/AuthContext.tsx
 'use client';
 
@@ -259,6 +260,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return appUser;
     } catch (error) {
       const authError = error as SupabaseAuthError;
+      // Common reason for "Database error saving new user" is RLS policy on auth.users or related public.users table.
+      // Ensure your Supabase project allows user creation/insertion via its policies. Check Supabase dashboard logs.
+      // This could also be due to other database constraints or triggers.
       toast({ title: 'Supabase Signup Failed', description: authError.message, variant: 'destructive' });
       console.error('Supabase Signup error:', authError);
       return null;
