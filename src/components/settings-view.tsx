@@ -16,7 +16,7 @@ import {
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
-import { Moon, Sun, Laptop, Zap, MessageCircle, LogOut, UserCircle, Database } from 'lucide-react'; // Added Database
+import { Moon, Sun, Laptop, Zap, MessageCircle, LogOut, UserCircle, Database, Chrome } from 'lucide-react'; // Added Chrome
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'; 
 import { cn } from '@/lib/utils';
 
@@ -48,6 +48,9 @@ export function SettingsView() {
     }
     if (currentProvider === 'supabase') {
       return <Zap className="h-4 w-4 text-green-500" title="Supabase" />;
+    }
+    if (currentProvider === 'google') {
+      return <Chrome className="h-4 w-4 text-blue-500" title="Google" />;
     }
     return null;
   }

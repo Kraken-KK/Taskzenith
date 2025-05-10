@@ -20,7 +20,7 @@ import { AiChat } from "@/components/ai-chat";
 import { SettingsView } from '@/components/settings-view';
 import { PrioritizeTasksView } from '@/components/prioritize-tasks-view';
 import { SmartTaskCreationView } from '@/components/smart-task-creation-view';
-import { Bot, CheckSquare, ListTodo, Settings, Star, Menu, FolderKanban, PlusCircle, Edit3, Trash2, Palette, LogOut, Database, Zap, User } from "lucide-react";
+import { Bot, CheckSquare, ListTodo, Settings, Star, Menu, FolderKanban, PlusCircle, Edit3, Trash2, Palette, LogOut, Database, Zap, User, Chrome } from "lucide-react"; // Added Chrome
 import { useSidebar } from '@/components/ui/sidebar';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -50,7 +50,7 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogTrigger, // Added AlertDialogTrigger
+  AlertDialogTrigger, 
 } from "@/components/ui/alert-dialog";
 import { useToast } from '@/hooks/use-toast';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -79,16 +79,14 @@ export default function Home() {
     }
   }, [currentUser, authLoading, isGuest, router]);
 
-  // Effect to ensure an active board is selected if possible
   useEffect(() => {
-    // This logic should apply to both logged-in users and guests
     if ((currentUser || isGuest) && !activeBoardId && boards.length > 0) { 
       setActiveBoardId(boards[0].id);
     }
   }, [activeBoardId, boards, setActiveBoardId, currentUser, isGuest]);
 
 
-  if (authLoading || (!currentUser && !isGuest)) { // Show loader if auth is loading OR if not logged in and not a guest
+  if (authLoading || (!currentUser && !isGuest)) { 
     return (
       <div className="flex h-screen w-screen items-center justify-center bg-background">
         <svg className="animate-spin h-12 w-12 text-primary" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -136,7 +134,7 @@ export default function Home() {
     if (currentUser?.email) {
       return currentUser.email.charAt(0).toUpperCase();
     }
-    return "G"; // Guest
+    return "G"; // Guest or fallback
   }
   
   const getProviderIcon = () => {
@@ -145,6 +143,9 @@ export default function Home() {
     }
     if (currentProvider === 'supabase') {
       return <Zap className="h-3 w-3 text-green-500" title="Supabase" />;
+    }
+    if (currentProvider === 'google') {
+      return <Chrome className="h-3 w-3 text-blue-500" title="Google" />;
     }
     return null;
   }
@@ -174,14 +175,13 @@ export default function Home() {
         </SidebarHeader>
         <SidebarContent className="flex-1 overflow-y-auto p-2">
           <SidebarMenu>
-            {/* Board Management Dropdown */}
             <SidebarMenuItem>
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                         <SidebarMenuButton
                             tooltip="My Boards"
                             className="w-full hover:bg-sidebar-accent/80 dark:hover:bg-sidebar-accent/50"
-                            disabled={authLoading && !currentUser && !isGuest} // Disable if loading and no user/guest yet
+                            disabled={authLoading && !currentUser && !isGuest} 
                         >
                             <FolderKanban />
                             My Boards
@@ -191,7 +191,7 @@ export default function Home() {
                         <DropdownMenuLabel>Your Boards</DropdownMenuLabel>
                         <DropdownMenuSeparator />
                         {boards.map(board => (
-                           <AlertDialog key={board.id}> {/* Wrap DropdownMenuSub with AlertDialog for unique key context */}
+                           <AlertDialog key={board.id}> 
                             <DropdownMenuSub>
                                 <DropdownMenuSubTrigger
                                     className={cn("justify-between", board.id === activeBoardId && "bg-accent text-accent-foreground")}

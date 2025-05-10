@@ -10,7 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Loader2, LogIn, UserPlus, Database, Zap, User } from 'lucide-react'; 
+import { Loader2, LogIn, UserPlus, Database, Zap, User, Chrome } from 'lucide-react'; // Added Chrome as Google icon
 import Link from 'next/link';
 import { useAuth, type AuthProviderType } from '@/contexts/AuthContext';
 
@@ -29,7 +29,7 @@ interface AuthFormProps {
 
 export function AuthForm({ mode, onSubmit, loading }: AuthFormProps) {
   const [selectedProvider, setSelectedProvider] = useState<AuthProviderType>('firebase');
-  const { enterGuestMode } = useAuth();
+  const { enterGuestMode, signInWithGoogleFirebase } = useAuth(); // Added signInWithGoogleFirebase
   const {
     register,
     handleSubmit,
@@ -44,6 +44,11 @@ export function AuthForm({ mode, onSubmit, loading }: AuthFormProps) {
     await onSubmit(data, selectedProvider);
   };
 
+  const handleGoogleSignIn = async () => {
+    await signInWithGoogleFirebase();
+    // Navigation is handled within signInWithGoogleFirebase on success
+  };
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-secondary/20 dark:bg-neutral-900/50 p-4 animate-fadeIn">
       <Card className="w-full max-w-md shadow-2xl">
@@ -56,11 +61,34 @@ export function AuthForm({ mode, onSubmit, loading }: AuthFormProps) {
           </CardTitle>
           <CardDescription>
             {isLoginMode ? 'Log in to access your TaskZenith dashboard.' : 'Sign up to start managing your tasks with AI.'}
-            {!isLoginMode && ' Choose your preferred authentication provider below.'}
-            {' Or, continue as a guest to explore.'}
+            {' Or, use an alternative sign-in method or continue as a guest to explore.'}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
+          {/* Google Sign-In Button */}
+          {isLoginMode && ( // Show Google Sign-In for login mode, can be shown for signup too if desired
+            <Button variant="outline" className="w-full text-lg py-6" onClick={handleGoogleSignIn} disabled={loading}>
+              <Chrome className="mr-2 h-5 w-5" /> Sign in with Google
+            </Button>
+          )}
+          {!isLoginMode && ( // Show Google Sign-up for signup mode
+             <Button variant="outline" className="w-full text-lg py-6" onClick={handleGoogleSignIn} disabled={loading}>
+              <Chrome className="mr-2 h-5 w-5" /> Sign up with Google
+            </Button>
+          )}
+          
+          {/* Separator */}
+           <div className="relative my-4">
+            <div className="absolute inset-0 flex items-center">
+                <span className="w-full border-t" />
+            </div>
+            <div className="relative flex justify-center text-xs uppercase">
+                <span className="bg-card px-2 text-muted-foreground">
+                 Or {isLoginMode ? 'log in' : 'sign up'} with Email
+                </span>
+            </div>
+          </div>
+
           <Tabs value={selectedProvider} onValueChange={(value) => setSelectedProvider(value as AuthProviderType)} className="w-full">
             <TabsList className="grid w-full grid-cols-2">
               <TabsTrigger value="firebase" className="flex items-center gap-2">
@@ -154,7 +182,7 @@ export function AuthForm({ mode, onSubmit, loading }: AuthFormProps) {
                 <span className="w-full border-t" />
             </div>
             <div className="relative flex justify-center text-xs uppercase">
-                <span className="bg-background px-2 text-muted-foreground">
+                <span className="bg-card px-2 text-muted-foreground">
                 Or
                 </span>
             </div>

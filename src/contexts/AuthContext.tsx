@@ -11,7 +11,9 @@ import {
   createUserWithEmailAndPassword as createUserWithFirebase, 
   signInWithEmailAndPassword as signInWithFirebase, 
   signOut as signOutFirebase,
-  updateProfile as updateFirebaseProfile
+  updateProfile as updateFirebaseProfile,
+  GoogleAuthProvider, // Import GoogleAuthProvider
+  signInWithPopup // Import signInWithPopup
 } from 'firebase/auth';
 import { useToast } from '@/hooks/use-toast';
 import { useRouter } from 'next/navigation';
@@ -23,16 +25,17 @@ export interface AppUser {
   email: string | null;
   displayName: string | null;
   photoURL?: string | null;
-  provider: AuthProviderType;
+  provider: AuthProviderType | 'google'; // Add 'google' to provider type
 }
 
 interface AuthContextType {
   currentUser: AppUser | null;
   loading: boolean;
-  currentProvider: AuthProviderType | null;
+  currentProvider: AuthProviderType | 'google' | null;
   isGuest: boolean;
   signupWithFirebase: (email: string, password: string) => Promise<AppUser | null>;
   loginWithFirebase: (email: string, password: string) => Promise<AppUser | null>;
+  signInWithGoogleFirebase: () => Promise<AppUser | null>; // Add Google sign-in method
   signupWithSupabase: (email: string, password: string) => Promise<AppUser | null>;
   loginWithSupabase: (email: string, password: string) => Promise<AppUser | null>;
   logout: () => Promise<void>;
@@ -48,7 +51,7 @@ const AUTH_PROVIDER_STORAGE_KEY = 'taskzenith-auth-provider';
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUser] = useState<AppUser | null>(null);
-  const [currentProvider, setCurrentProvider] = useState<AuthProviderType | null>(null);
+  const [currentProvider, setCurrentProvider] = useState<AuthProviderType | 'google' | null>(null);
   const [isGuest, setIsGuest] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem(GUEST_MODE_STORAGE_KEY) === 'true';
@@ -59,12 +62,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const { toast } = useToast();
   const router = useRouter();
 
-  const mapFirebaseUserToAppUser = (firebaseUser: FirebaseUser): AppUser => ({
+  const mapFirebaseUserToAppUser = (firebaseUser: FirebaseUser, providerOverride?: 'google'): AppUser => ({
     id: firebaseUser.uid,
     email: firebaseUser.email,
     displayName: firebaseUser.displayName,
     photoURL: firebaseUser.photoURL,
-    provider: 'firebase',
+    provider: providerOverride || 'firebase',
   });
 
   const mapSupabaseUserToAppUser = (supabaseUser: SupabaseUser): AppUser => ({
@@ -84,17 +87,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setCurrentUser(null);
       setCurrentProvider(null);
       setLoading(false);
-      return; // Don't initialize Firebase/Supabase listeners if in guest mode initially
+      return; 
     }
 
-    // Firebase Auth State Listener
     const unsubscribeFirebase = onFirebaseAuthStateChanged(firebaseAuth, (firebaseUser) => {
-      if (firebaseUser && !isGuest) { // Check !isGuest again in case it changed
-        const appUser = mapFirebaseUserToAppUser(firebaseUser);
+      if (firebaseUser && !isGuest) { 
+        // Determine if this was a Google sign-in by checking providerData
+        const isGoogleSignIn = firebaseUser.providerData.some(pd => pd.providerId === GoogleAuthProvider.PROVIDER_ID);
+        const appUser = mapFirebaseUserToAppUser(firebaseUser, isGoogleSignIn ? 'google' : undefined);
         setCurrentUser(appUser);
-        setCurrentProvider('firebase');
-        localStorage.setItem(AUTH_PROVIDER_STORAGE_KEY, 'firebase');
-      } else if (localStorage.getItem(AUTH_PROVIDER_STORAGE_KEY) === 'firebase') { 
+        setCurrentProvider(isGoogleSignIn ? 'google' : 'firebase');
+        localStorage.setItem(AUTH_PROVIDER_STORAGE_KEY, isGoogleSignIn ? 'google' : 'firebase');
+      } else if (localStorage.getItem(AUTH_PROVIDER_STORAGE_KEY) === 'firebase' || localStorage.getItem(AUTH_PROVIDER_STORAGE_KEY) === 'google') { 
         setCurrentUser(null);
         setCurrentProvider(null);
         localStorage.removeItem(AUTH_PROVIDER_STORAGE_KEY);
@@ -102,10 +106,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(false);
     });
 
-    // Supabase Auth State Listener
     const { data: { subscription: supabaseAuthSubscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      setLoading(true); // Set loading true at start of change
-      if (!isGuest) { // Check !isGuest again
+      setLoading(true); 
+      if (!isGuest) { 
         const supabaseUser = session?.user;
         if (supabaseUser) {
           const appUser = mapSupabaseUserToAppUser(supabaseUser);
@@ -121,8 +124,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(false);
     });
     
-    const persistedProvider = localStorage.getItem(AUTH_PROVIDER_STORAGE_KEY) as AuthProviderType | null;
-    if (!persistedProvider && !storedGuestMode) { // if no provider and not guest
+    const persistedProvider = localStorage.getItem(AUTH_PROVIDER_STORAGE_KEY) as AuthProviderType | 'google' | null;
+    if (!persistedProvider && !storedGuestMode) { 
         setLoading(false); 
     }
 
@@ -131,22 +134,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       unsubscribeFirebase();
       supabaseAuthSubscription?.unsubscribe();
     };
-  }, [isGuest]); // Rerun if isGuest changes
+  }, [isGuest]); 
 
-  const commonLoginSuccess = (appUser: AppUser, provider: AuthProviderType) => {
+  const commonLoginSuccess = (appUser: AppUser, provider: AuthProviderType | 'google') => {
     setCurrentUser(appUser);
     setCurrentProvider(provider);
     setIsGuest(false);
     localStorage.setItem(AUTH_PROVIDER_STORAGE_KEY, provider);
     localStorage.removeItem(GUEST_MODE_STORAGE_KEY);
+    router.push('/');
   };
 
-  const commonSignupSuccess = (appUser: AppUser, provider: AuthProviderType) => {
-    setCurrentUser(appUser); // May be overridden by onAuthStateChange for Supabase confirmation
+  const commonSignupSuccess = (appUser: AppUser, provider: AuthProviderType | 'google') => {
+    setCurrentUser(appUser); 
     setCurrentProvider(provider);
     setIsGuest(false);
     localStorage.setItem(AUTH_PROVIDER_STORAGE_KEY, provider);
     localStorage.removeItem(GUEST_MODE_STORAGE_KEY);
+    router.push('/');
   };
 
 
@@ -191,6 +196,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const signInWithGoogleFirebase = async (): Promise<AppUser | null> => {
+    setLoading(true);
+    const provider = new GoogleAuthProvider();
+    try {
+      const result = await signInWithPopup(firebaseAuth, provider);
+      const appUser = mapFirebaseUserToAppUser(result.user, 'google');
+      toast({ title: 'Google Sign-In Successful', description: `Welcome, ${appUser.displayName || 'User'}!` });
+      commonLoginSuccess(appUser, 'google');
+      return appUser;
+    } catch (error) {
+      const authError = error as FirebaseAuthError;
+      toast({ title: 'Google Sign-In Failed', description: authError.message, variant: 'destructive' });
+      console.error('Google Sign-In error:', authError);
+      // Specific error handling if needed (e.g., account-exists-with-different-credential)
+      if (authError.code === 'auth/account-exists-with-different-credential') {
+        toast({
+          title: 'Account Exists',
+          description: 'An account already exists with the same email address but different sign-in credentials. Try signing in with the original method.',
+          variant: 'destructive',
+          duration: 7000,
+        });
+      }
+      return null;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+
   const signupWithSupabase = async (email: string, password: string): Promise<AppUser | null> => {
     setLoading(true);
     try {
@@ -208,7 +242,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       const appUser = mapSupabaseUserToAppUser(data.user);
       toast({ title: 'Supabase Signup Successful', description: 'Please check your email to confirm registration!' });
-      commonSignupSuccess(appUser, 'supabase'); // optimistic update
+      commonSignupSuccess(appUser, 'supabase'); 
       return appUser;
     } catch (error) {
       const authError = error as SupabaseAuthError;
@@ -245,7 +279,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setLoading(true);
     const providerToLogout = currentProvider; 
     try {
-      if (providerToLogout === 'firebase') {
+      if (providerToLogout === 'firebase' || providerToLogout === 'google') {
         await signOutFirebase(firebaseAuth);
       } else if (providerToLogout === 'supabase') {
         const { error } = await supabase.auth.signOut();
@@ -272,15 +306,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setCurrentProvider(null);
     setIsGuest(true);
     localStorage.setItem(GUEST_MODE_STORAGE_KEY, 'true');
-    localStorage.removeItem(AUTH_PROVIDER_STORAGE_KEY); // Clear any lingering auth provider
+    localStorage.removeItem(AUTH_PROVIDER_STORAGE_KEY); 
     router.push('/');
   }, [router]);
 
   const exitGuestMode = useCallback(() => {
     setIsGuest(false);
     localStorage.removeItem(GUEST_MODE_STORAGE_KEY);
-    // Optionally clear guest data here if TaskContext doesn't handle it.
-    // For now, TaskContext will switch keys.
     router.push('/login');
   }, [router]);
 
@@ -291,6 +323,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     isGuest,
     signupWithFirebase,
     loginWithFirebase,
+    signInWithGoogleFirebase, // Add to context value
     signupWithSupabase,
     loginWithSupabase,
     logout,

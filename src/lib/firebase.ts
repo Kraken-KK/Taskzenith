@@ -40,4 +40,13 @@ if (!getApps().length) {
 const auth: Auth = getAuth(app);
 // const db: Firestore = getFirestore(app); // Uncomment if you need Firestore
 
+// Developer Note: To enable Google Sign-In:
+// 1. Go to your Firebase project console.
+// 2. Navigate to "Authentication" under the "Build" section.
+// 3. Select the "Sign-in method" tab.
+// 4. Find "Google" in the list of providers and enable it.
+// 5. You may need to provide a project support email.
+// For web applications, this is typically all that's needed. If you plan to build Android/iOS apps,
+// you'll also need to configure SHA-1 fingerprints (for Android) or URL schemes (for iOS).
+
 export { app, auth }; // Remove db if not used
