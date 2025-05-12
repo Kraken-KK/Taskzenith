@@ -11,13 +11,14 @@ import { Progress } from "@/components/ui/progress";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Plus, Edit2, Trash2, Check, X, AlertTriangle, ListChecks, Filter, ArrowUpDown, Link2, MoreHorizontal, PlusCircle, CalendarDays, Tags, UserCircle, Palette, FolderKanban } from 'lucide-react';
+import { Plus, Edit2, Trash2, Check, X, AlertTriangle, ListChecks, Filter, ArrowUpDown, Link2, MoreHorizontal, PlusCircle, CalendarDays, Tags, UserCircle, Palette, FolderKanban, Users, Building } from 'lucide-react'; // Added Users, Building
 import Confetti from 'react-confetti';
 import { useToast } from "@/hooks/use-toast";
-import type { Task, Column as ColumnType, ChecklistItem, Board } from '@/types';
+import type { Task, Column as ColumnType, ChecklistItem, Board, Organization, Team } from '@/types'; // Added Organization, Team
 import { AddTaskDialog } from '@/components/add-task-dialog';
 import { useTasks } from '@/contexts/TaskContext';
 import { useSettings } from '@/contexts/SettingsContext';
+import { useAuth } from '@/contexts/AuthContext'; // Added useAuth
 import { cn } from '@/lib/utils';
 import {
   AlertDialog,
@@ -121,7 +122,7 @@ function TaskCard({
   const totalChecklistItems = task.checklist?.length || 0;
   const checklistProgress = totalChecklistItems > 0 ? (completedChecklistItems / totalChecklistItems) * 100 : 0;
 
-  const isOverdue = task.deadline && new Date(task.deadline) < new Date() && task.status.toLowerCase() !== 'done';
+  const isOverdue = task.deadline && new Date(task.deadline) < new Date() && task.status.toLowerCase() !== 'done'; // Assuming 'done' is a status title
 
   return (
     <Card
@@ -149,7 +150,7 @@ function TaskCard({
             </p>
           )}
           {isBetaModeEnabled && (
-            <AlertDialog> {/* Added AlertDialog root for task deletion */}
+            <AlertDialog> 
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="ghost" size="icon" className="h-6 w-6">
@@ -216,6 +217,28 @@ function TaskCard({
                   </TooltipProvider>
                 );
               })}
+            </div>
+          </div>
+        )}
+         {/* Placeholder for assigned users in Beta mode */}
+        {isBetaModeEnabled && task.assignedTo && task.assignedTo.length > 0 && (
+          <div className="mt-1">
+            <span className="text-xs font-semibold text-muted-foreground">Assigned to:</span>
+            <div className="flex flex-wrap gap-1 mt-0.5">
+              {task.assignedTo.map(userId => (
+                <TooltipProvider key={userId}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Badge variant="secondary" className="text-xs py-0.5 px-1.5">
+                        <UserCircle className="h-3 w-3 mr-1" />
+                        {/* Fetch user display name here if possible, otherwise show ID */}
+                        {userId.substring(0, 8)}...
+                      </Badge>
+                    </TooltipTrigger>
+                    <TooltipContent><p>User ID: {userId}</p></TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              ))}
             </div>
           </div>
         )}
@@ -312,6 +335,7 @@ export function KanbanBoard() {
     addColumn, updateColumnTitle, deleteColumn, updateColumnWipLimit, 
     addChecklistItem, toggleChecklistItem, deleteChecklistItem, updateChecklistItemText, getTaskById,
   } = useTasks();
+  const { currentUser } = useAuth(); // For team/org context
   
   const activeBoard = getActiveBoard();
   const { isBetaModeEnabled } = useSettings();
@@ -330,6 +354,18 @@ export function KanbanBoard() {
   const [priorityFilter, setPriorityFilter] = useState<PriorityFilter>('all');
   const [tagFilter, setTagFilter] = useState<string>('');
   const [columnSortOptions, setColumnSortOptions] = useState<Record<string, SortOption>>({});
+
+  // Placeholder for WebRTC state and functions
+  // const [isCollaborationActive, setIsCollaborationActive] = useState(false);
+  // const [collaborationPeers, setCollaborationPeers] = useState([]);
+  // useEffect(() => {
+  //   if (activeBoard && activeBoard.teamId && isBetaModeEnabled) {
+  //     // Initialize WebRTC connection here for the activeBoard.teamId
+  //     // Example: setupWebRTC(activeBoard.teamId, currentUser.id, handleIncomingData);
+  //     // return () => closeWebRTC();
+  //   }
+  // }, [activeBoard, currentUser, isBetaModeEnabled]);
+
 
   const boardInlineStyles = useMemo(() => {
     const theme = activeBoard?.theme;
@@ -374,6 +410,7 @@ export function KanbanBoard() {
   };
 
   const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    // Check if the mouse is leaving to an element that is not a child
     if (e.currentTarget.contains(e.relatedTarget as Node)) {
         return;
     }
@@ -385,7 +422,7 @@ export function KanbanBoard() {
     if (!draggedTask || !activeBoard) return;
 
     const targetColumn = activeBoard.columns.find(col => col.id === targetColumnId);
-    if (targetColumn && targetColumn.wipLimit && targetColumn.tasks.length >= targetColumn.wipLimit) {
+    if (targetColumn && targetColumn.wipLimit && targetColumn.wipLimit > 0 && targetColumn.tasks.length >= targetColumn.wipLimit) {
         toast({
             title: "WIP Limit Reached",
             description: `Column "${targetColumn.title}" has reached its Work-In-Progress limit of ${targetColumn.wipLimit}.`,
@@ -399,7 +436,8 @@ export function KanbanBoard() {
     const { task: movedTaskData, automated } = moveTask(draggedTask.id, draggedTask.status, targetColumnId, isBetaModeEnabled);
     
     if (movedTaskData) {
-      if (activeBoard.columns.find(c => c.id === targetColumnId)?.title.toLowerCase() === 'done') {
+      const targetCol = activeBoard.columns.find(c => c.id === targetColumnId);
+      if (targetCol && targetCol.title.toLowerCase() === 'done') {
         setShowConfetti(true);
         setTimeout(() => setShowConfetti(false), 5000);
       }
@@ -440,7 +478,7 @@ export function KanbanBoard() {
     if (!isNaN(limit) && limit >=0) {
         updateColumnWipLimit(columnId, limit);
     } else if (limitStr === "") {
-        updateColumnWipLimit(columnId, undefined);
+        updateColumnWipLimit(columnId, undefined); // Set to undefined for no limit
     } else {
         toast({ title: "Invalid WIP Limit", description: "Please enter a valid number for WIP limit.", variant: "destructive"});
     }
@@ -490,6 +528,21 @@ export function KanbanBoard() {
       </div>
     );
   }
+  
+  const boardOrgTeamInfo = () => {
+    if (!activeBoard) return null;
+    const parts = [];
+    if (activeBoard.organizationId) {
+        // In a real app, you'd fetch the org/team names here
+        parts.push(<span key="org" className="flex items-center gap-1"><Building className="h-3 w-3" /> Org: {activeBoard.organizationId.substring(0,6)}..</span>);
+    }
+    if (activeBoard.teamId) {
+        parts.push(<span key="team" className="flex items-center gap-1"><Users className="h-3 w-3" /> Team: {activeBoard.teamId.substring(0,6)}..</span>);
+    }
+    if (parts.length === 0) return null;
+    return <Badge variant="outline" className="text-xs ml-2">{parts.reduce((prev, curr, i) => [prev, i > 0 && <span key={`sep-${i}`} className="mx-1">|</span>, curr] as any )}</Badge>;
+  };
+
 
   return (
     <div 
@@ -500,14 +553,17 @@ export function KanbanBoard() {
         <Confetti width={windowSize.width} height={windowSize.height} recycle={false} numberOfPieces={500} gravity={0.15} tweenDuration={7000}/>
       )}
       <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
-        <AddTaskDialog open={isAddTaskDialogOpen} onOpenChange={setIsAddTaskDialogOpen} onAddTask={handleAddTaskLocal}>
-          <Button 
-            onClick={() => setIsAddTaskDialogOpen(true)} 
-            className="shadow-md hover:shadow-lg transition-shadow bg-[var(--board-primary-color,hsl(var(--primary)))] text-[var(--board-primary-foreground-color,hsl(var(--primary-foreground)))] hover:bg-[var(--board-primary-color,hsl(var(--primary)))]/90"
-          >
-            <Plus className="mr-2 h-4 w-4" /> Add Task
-          </Button>
-        </AddTaskDialog>
+        <div className="flex items-center gap-2">
+            <AddTaskDialog open={isAddTaskDialogOpen} onOpenChange={setIsAddTaskDialogOpen} onAddTask={handleAddTaskLocal}>
+            <Button 
+                onClick={() => setIsAddTaskDialogOpen(true)} 
+                className="shadow-md hover:shadow-lg transition-shadow bg-[var(--board-primary-color,hsl(var(--primary)))] text-[var(--board-primary-foreground-color,hsl(var(--primary-foreground)))] hover:bg-[var(--board-primary-color,hsl(var(--primary)))]/90"
+            >
+                <Plus className="mr-2 h-4 w-4" /> Add Task
+            </Button>
+            </AddTaskDialog>
+            {boardOrgTeamInfo()}
+        </div>
         
         <div className="flex items-center gap-2">
             {isBetaModeEnabled && (
@@ -556,7 +612,7 @@ export function KanbanBoard() {
          <div className="flex gap-4 items-start">
           {activeBoard.columns.map(column => {
             const displayTasks = sortedAndFilteredTasks(column.tasks, column.id);
-            const wipLimitExceeded = column.wipLimit && column.tasks.length > column.wipLimit;
+            const wipLimitExceeded = column.wipLimit && column.wipLimit > 0 && column.tasks.length > column.wipLimit;
             
             return (
               <div
@@ -588,15 +644,15 @@ export function KanbanBoard() {
                         onClick={() => isBetaModeEnabled && handleEditColumnTitle(column.id, column.title)}
                     >
                         {column.title} ({column.tasks.length})
-                        {isBetaModeEnabled && column.wipLimit && (
+                        {isBetaModeEnabled && column.wipLimit && column.wipLimit > 0 && (
                             <span className={cn("text-xs ml-1.5", wipLimitExceeded ? "text-destructive font-bold" : "text-muted-foreground")}>
-                                (WIP: {column.wipLimit === 0 ? '∞' : column.wipLimit})
+                                (WIP: {column.wipLimit})
                             </span>
                         )}
                     </CardTitle>
                   )}
                   {isBetaModeEnabled && (
-                     <AlertDialog> {/* Wrap DropdownMenu and AlertDialogContent */}
+                     <AlertDialog> 
                         <DropdownMenu>
                             <DropdownMenuTrigger asChild>
                                 <Button variant="ghost" size="icon" className="h-7 w-7">
@@ -629,7 +685,7 @@ export function KanbanBoard() {
                                         type="number"
                                         min="0"
                                         placeholder="None"
-                                        defaultValue={column.wipLimit === undefined ? '' : column.wipLimit}
+                                        defaultValue={column.wipLimit === undefined || column.wipLimit === 0 ? '' : column.wipLimit}
                                         onChange={(e) => handleUpdateWipLimit(column.id, e.target.value)}
                                         className="h-8 text-sm"
                                     />
@@ -671,7 +727,7 @@ export function KanbanBoard() {
                   )}
                   {displayTasks.map(task => (
                        <TaskCard
-                        key={task.id} // Moved key to TaskCard as it's the direct child of map
+                        key={task.id} 
                         task={task}
                         columnId={column.id}
                         onDragStart={handleDragStart}
@@ -713,7 +769,16 @@ export function KanbanBoard() {
         </div>
       </ScrollArea>
       <BoardThemeCustomizer board={activeBoard} open={isThemeCustomizerOpen} onOpenChange={setIsThemeCustomizerOpen} />
+       {/* Placeholder for WebRTC Collaboration UI for this board */}
+       {/* {isBetaModeEnabled && activeBoard && activeBoard.teamId && (
+        <div className="fixed bottom-4 right-4 p-4 bg-card shadow-lg rounded-lg border">
+          <h4 className="text-sm font-semibold mb-2">Collaboration Space (Team: {activeBoard.teamId.substring(0,6)}...)</h4>
+          <p className="text-xs text-muted-foreground">WebRTC features would go here.</p>
+          <Button size="sm" variant="outline" className="mt-2" onClick={() => alert('WebRTC not implemented yet.')}>
+            Start Call (Demo)
+          </Button>
+        </div>
+      )} */}
     </div>
   );
 }
-

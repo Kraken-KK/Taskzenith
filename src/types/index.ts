@@ -27,11 +27,12 @@ export interface Task {
   tags: string[]; // Task tags
   checklist: ChecklistItem[]; // Checklists
   createdAt: string; // ISO string format for task creation time
+  assignedTo?: string[]; // User IDs of assignees, for team context
 }
 
 // Define the structure of a column on the Kanban board
 export interface Column {
-  id: string;
+  id:string;
   title: string;
   tasks: Task[]; // Tasks are directly within columns
   wipLimit?: number;
@@ -45,6 +46,9 @@ export interface Board {
   theme?: BoardTheme; // Optional theme customization
   createdAt: string; // ISO string format for board creation time
   groupId?: string | null; // Optional: ID of the group this board belongs to
+  organizationId?: string | null; // For associating with an organization
+  teamId?: string | null; // For associating with a team
+  isPublic?: boolean; // For future public sharing features
 }
 
 // Define the structure of a Board Group
@@ -53,4 +57,26 @@ export interface BoardGroup {
   name: string;
   boardIds: string[]; // Array of board IDs belonging to this group
   createdAt: string; // ISO string format for group creation time
+}
+
+// Define the structure of a Team
+export interface Team {
+  id: string;
+  name: string;
+  organizationId: string; // Each team belongs to an organization
+  memberIds: string[]; // Array of user IDs
+  adminIds: string[]; // Array of user IDs who are admins of this team
+  createdAt: string;
+  description?: string;
+}
+
+// Define the structure of an Organization
+export interface Organization {
+  id: string;
+  name: string;
+  ownerId: string; // User ID of the organization owner/creator
+  memberIds: string[]; // Array of user IDs (includes owner)
+  teamIds?: string[]; // Optional: List of team IDs within this organization
+  createdAt: string;
+  description?: string;
 }

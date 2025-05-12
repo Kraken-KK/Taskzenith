@@ -15,10 +15,10 @@ import {
   GoogleAuthProvider,
   signInWithPopup
 } from 'firebase/auth';
-import { doc, getDoc, setDoc, updateDoc, serverTimestamp, Timestamp } from 'firebase/firestore'; // Firestore imports
+import { doc, getDoc, setDoc, updateDoc, serverTimestamp, Timestamp, collection, addDoc, arrayUnion, arrayRemove, writeBatch, query, where, getDocs } from 'firebase/firestore'; // Firestore imports
 import { useToast } from '@/hooks/use-toast';
 import { useRouter } from 'next/navigation';
-import type { Board, Task, Column, BoardGroup } from '@/types'; // Ensure types are available
+import type { Board, Task, Column, BoardGroup, Organization, Team } from '@/types'; // Ensure types are available
 import { formatISO } from 'date-fns';
 import type { InteractionStyle } from './SettingsContext';
 import type { MessageHistoryItem } from '@/ai/flows/chat-flow';
@@ -56,6 +56,8 @@ const getDefaultBoardForNewUser = (): Board => ({
   createdAt: formatISO(new Date()),
   theme: {},
   groupId: null, // Initialize groupId
+  organizationId: null,
+  teamId: null,
 });
 
 const defaultUserSettings = {
@@ -77,6 +79,10 @@ export interface AppUser {
   displayName: string | null;
   photoURL?: string | null;
   provider: AuthProviderType | 'google';
+  // For co-working features
+  organizationMemberships?: string[]; // IDs of organizations the user is part of
+  teamMemberships?: string[]; // IDs of teams the user is part of
+  defaultOrganizationId?: string | null; // Active/default organization
 }
 
 interface AuthContextType {
@@ -92,6 +98,14 @@ interface AuthContextType {
   logout: () => Promise<void>;
   enterGuestMode: () => void;
   exitGuestMode: () => void;
+  // Co-working stubs
+  createOrganization: (name: string, description?: string) => Promise<Organization | null>;
+  createTeam: (name: string, organizationId: string, description?: string) => Promise<Team | null>;
+  joinTeam: (teamId: string) => Promise<boolean>; // Placeholder
+  // Functions to fetch user's organizations and teams might be needed
+  getUserOrganizations: () => Promise<Organization[]>;
+  getUserTeams: (organizationId?: string) => Promise<Team[]>;
+  setCurrentOrganization: (organizationId: string | null) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -119,6 +133,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     displayName: firebaseUser.displayName,
     photoURL: firebaseUser.photoURL,
     provider: providerOverride || 'firebase',
+    organizationMemberships: [], // Initialize co-working fields
+    teamMemberships: [],
+    defaultOrganizationId: null,
   });
 
   const mapSupabaseUserToAppUser = (supabaseUser: SupabaseUser): AppUser => ({
@@ -127,31 +144,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     displayName: supabaseUser.user_metadata?.displayName || supabaseUser.email?.split('@')[0] || 'User',
     photoURL: supabaseUser.user_metadata?.avatar_url,
     provider: 'supabase',
+    organizationMemberships: [], // Initialize co-working fields
+    teamMemberships: [],
+    defaultOrganizationId: null,
   });
 
-  /**
-   * Initializes or updates user data in Firestore.
-   * This function is crucial for ensuring user data persistence.
-   * 
-   * IF DATA IS NOT SAVING TO FIRESTORE or COLLECTIONS ARE NOT BEING CREATED:
-   * 1. CHECK YOUR FIRESTORE SECURITY RULES: This is the MOST COMMON cause.
-   *    Ensure that authenticated users have write permission to the `users/{userId}` path.
-   *    A basic rule for development might be:
-   *    ```
-   *    rules_version = '2';
-   *    service cloud.firestore {
-   *      match /databases/{database}/documents {
-   *        match /users/{userId} {
-   *          allow read, write: if request.auth != null && request.auth.uid == userId;
-   *        }
-   *      }
-   *    }
-   *    ```
-   * 2. VERIFY FIREBASE CONFIGURATION: Ensure your `.env.local` file has the correct
-   *    Firebase project details (apiKey, projectId, etc.).
-   * 3. CHECK CONSOLE LOGS: Look for any Firestore-related errors in the browser console.
-   *    The detailed logs added below should help pinpoint where the process might be failing.
-   */
   const initializeFirestoreUserData = async (appUser: AppUser) => {
     if (!appUser || !appUser.id) {
       console.error("Firestore Init: `appUser` or `appUser.id` is undefined. Cannot initialize user data.", appUser);
@@ -179,7 +176,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           activeBoardId: defaultBoard.id,
           settings: defaultUserSettings,
           aiChatHistory: defaultAiChatHistory,
-          boardGroups: [] as BoardGroup[], // Initialize boardGroups
+          boardGroups: [] as BoardGroup[],
+          // Co-working fields
+          organizationMemberships: [],
+          teamMemberships: [],
+          defaultOrganizationId: null,
         };
         console.log(`Firestore Init: Data for new user ${appUser.id}:`, JSON.stringify(newUserDocumentData, null, 2));
         await setDoc(userDocRef, newUserDocumentData);
@@ -193,19 +194,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         // Ensure essential structures exist
         if (!userData.boards || !Array.isArray(userData.boards) || userData.boards.length === 0) {
-          updates.boards = [defaultBoard]; // defaultBoard already includes groupId: null
+          updates.boards = [defaultBoard]; 
           updates.activeBoardId = defaultBoard.id;
           needsUpdate = true;
           console.log(`Firestore Init: User ${appUser.id} - boards missing or empty. Adding default board.`);
         } else {
-          // Ensure all existing boards have a groupId
           updates.boards = userData.boards.map((board: Board) => ({
             ...board,
             groupId: board.groupId === undefined ? null : board.groupId,
+            organizationId: board.organizationId === undefined ? null : board.organizationId,
+            teamId: board.teamId === undefined ? null : board.teamId,
           }));
           if (JSON.stringify(updates.boards) !== JSON.stringify(userData.boards)) {
              needsUpdate = true;
-             console.log(`Firestore Init: User ${appUser.id} - updated boards with groupId.`);
+             console.log(`Firestore Init: User ${appUser.id} - updated boards with groupId/orgId/teamId.`);
           }
         }
         
@@ -222,46 +224,50 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (!userData.settings) {
           updates.settings = defaultUserSettings;
           needsUpdate = true;
-          console.log(`Firestore Init: User ${appUser.id} - settings missing. Adding default settings.`);
         }
         if (!userData.aiChatHistory) {
           updates.aiChatHistory = defaultAiChatHistory;
           needsUpdate = true;
-          console.log(`Firestore Init: User ${appUser.id} - AI chat history missing. Adding default history.`);
         }
-        if (!userData.boardGroups || !Array.isArray(userData.boardGroups)) { // Initialize boardGroups if missing
+        if (!userData.boardGroups || !Array.isArray(userData.boardGroups)) { 
           updates.boardGroups = [];
           needsUpdate = true;
-          console.log(`Firestore Init: User ${appUser.id} - boardGroups missing. Adding empty array.`);
+        }
+        // Co-working fields initialization
+        if (!userData.organizationMemberships || !Array.isArray(userData.organizationMemberships)) {
+          updates.organizationMemberships = [];
+          needsUpdate = true;
+        }
+        if (!userData.teamMemberships || !Array.isArray(userData.teamMemberships)) {
+          updates.teamMemberships = [];
+          needsUpdate = true;
+        }
+        if (userData.defaultOrganizationId === undefined) { // Check for undefined specifically
+          updates.defaultOrganizationId = null;
+          needsUpdate = true;
         }
         
         // Update user profile info if changed
         if (appUser.email && userData.email !== appUser.email) {
-            updates.email = appUser.email;
-            needsUpdate = true;
+            updates.email = appUser.email; needsUpdate = true;
         }
         if (appUser.displayName && userData.displayName !== appUser.displayName) {
-            updates.displayName = appUser.displayName;
-            needsUpdate = true;
+            updates.displayName = appUser.displayName; needsUpdate = true;
         }
         if (appUser.photoURL !== undefined && userData.photoURL !== appUser.photoURL) {
-            updates.photoURL = appUser.photoURL || null;
-            needsUpdate = true;
+            updates.photoURL = appUser.photoURL || null; needsUpdate = true;
         }
         if(userData.provider !== appUser.provider) {
-            updates.provider = appUser.provider;
-            needsUpdate = true;
+            updates.provider = appUser.provider; needsUpdate = true;
         }
 
         if (needsUpdate) {
           console.log(`Firestore Init: Updating existing document for ${appUser.id} with changes:`, Object.keys(updates));
-          console.log(`Firestore Init: Update data for user ${appUser.id}:`, JSON.stringify(updates, null, 2));
           await updateDoc(userDocRef, updates);
           console.log(`Firestore Init: SUCCESS - Document UPDATED for user: ${appUser.id}`);
         } else {
           console.log(`Firestore Init: No major field updates needed for ${appUser.id}. Updating lastLogin only.`);
           await updateDoc(userDocRef, { lastLogin: serverTimestamp() as Timestamp });
-          console.log(`Firestore Init: SUCCESS - lastLogin UPDATED for user: ${appUser.id}`);
         }
       }
     } catch (error) {
@@ -269,9 +275,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       toast({ 
         title: 'Data Sync Error', 
-        description: `Could not save user data: ${errorMessage}. Please check console and Firestore rules.`, 
+        description: `Could not save user data: ${errorMessage}.`, 
         variant: 'destructive', 
-        duration: 15000 
       });
     }
   };
@@ -286,23 +291,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setCurrentUser(null);
       setCurrentProvider(null);
       setLoading(false);
-      console.log("Auth: Guest mode active from localStorage.");
       return; 
     }
 
-    console.log("Auth: Setting up Firebase and Supabase auth listeners.");
     const unsubscribeFirebase = onFirebaseAuthStateChanged(firebaseAuth, async (firebaseUser) => {
-      console.log("Auth: Firebase onAuthStateChanged triggered. User:", firebaseUser ? firebaseUser.uid : 'null');
       if (firebaseUser && !isGuest) { 
         const isGoogleSignIn = firebaseUser.providerData.some(pd => pd.providerId === GoogleAuthProvider.PROVIDER_ID);
-        const appUser = mapFirebaseUserToAppUser(firebaseUser, isGoogleSignIn ? 'google' : undefined);
-        console.log("Auth: Firebase user identified:", appUser);
-        setCurrentUser(appUser);
+        const baseAppUser = mapFirebaseUserToAppUser(firebaseUser, isGoogleSignIn ? 'google' : undefined);
+        
+        // Fetch co-working fields from Firestore
+        const userDocRef = doc(db, 'users', baseAppUser.id);
+        const userDocSnap = await getDoc(userDocRef);
+        let finalAppUser = baseAppUser;
+        if (userDocSnap.exists()) {
+            const userData = userDocSnap.data();
+            finalAppUser = {
+                ...baseAppUser,
+                organizationMemberships: userData.organizationMemberships || [],
+                teamMemberships: userData.teamMemberships || [],
+                defaultOrganizationId: userData.defaultOrganizationId || null,
+            };
+        }
+        
+        setCurrentUser(finalAppUser);
         setCurrentProvider(isGoogleSignIn ? 'google' : 'firebase');
         if (typeof window !== 'undefined') localStorage.setItem(AUTH_PROVIDER_STORAGE_KEY, isGoogleSignIn ? 'google' : 'firebase');
-        await initializeFirestoreUserData(appUser); 
+        await initializeFirestoreUserData(finalAppUser); 
       } else if (typeof window !== 'undefined' && (localStorage.getItem(AUTH_PROVIDER_STORAGE_KEY) === 'firebase' || localStorage.getItem(AUTH_PROVIDER_STORAGE_KEY) === 'google')) { 
-        console.log("Auth: Firebase user logged out or no user, clearing Firebase session.");
         setCurrentUser(null);
         setCurrentProvider(null);
        if (typeof window !== 'undefined') localStorage.removeItem(AUTH_PROVIDER_STORAGE_KEY);
@@ -311,19 +326,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
 
     const { data: { subscription: supabaseAuthSubscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log("Auth: Supabase onAuthStateChange triggered. Event:", event, "Session:", session ? session.user.id : 'null');
       setLoading(true); 
       if (!isGuest) { 
         const supabaseUser = session?.user;
         if (supabaseUser) {
-          const appUser = mapSupabaseUserToAppUser(supabaseUser);
-          console.log("Auth: Supabase user identified:", appUser);
-          setCurrentUser(appUser);
+          const baseAppUser = mapSupabaseUserToAppUser(supabaseUser);
+          const userDocRef = doc(db, 'users', baseAppUser.id);
+          const userDocSnap = await getDoc(userDocRef);
+          let finalAppUser = baseAppUser;
+            if (userDocSnap.exists()) {
+                const userData = userDocSnap.data();
+                finalAppUser = {
+                    ...baseAppUser,
+                    organizationMemberships: userData.organizationMemberships || [],
+                    teamMemberships: userData.teamMemberships || [],
+                    defaultOrganizationId: userData.defaultOrganizationId || null,
+                };
+            }
+          setCurrentUser(finalAppUser);
           setCurrentProvider('supabase');
           if (typeof window !== 'undefined') localStorage.setItem(AUTH_PROVIDER_STORAGE_KEY, 'supabase');
-          await initializeFirestoreUserData(appUser); 
+          await initializeFirestoreUserData(finalAppUser); 
         } else if (typeof window !== 'undefined' && localStorage.getItem(AUTH_PROVIDER_STORAGE_KEY) === 'supabase') {
-          console.log("Auth: Supabase user logged out or no session, clearing Supabase session.");
           setCurrentUser(null);
           setCurrentProvider(null);
           if (typeof window !== 'undefined') localStorage.removeItem(AUTH_PROVIDER_STORAGE_KEY);
@@ -334,20 +358,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     
     const persistedProvider = typeof window !== 'undefined' ? localStorage.getItem(AUTH_PROVIDER_STORAGE_KEY) as AuthProviderType | 'google' | null : null;
     if (!persistedProvider && !storedGuestMode) { 
-        console.log("Auth: No persisted provider and not in guest mode. Initial load complete.");
         setLoading(false); 
     }
 
-
     return () => {
-      console.log("Auth: Unsubscribing auth listeners.");
       unsubscribeFirebase();
       supabaseAuthSubscription?.unsubscribe();
     };
   }, [isGuest]); 
 
   const commonLoginSuccess = async (appUser: AppUser, provider: AuthProviderType | 'google') => {
-    console.log(`Auth: Common login success for user ${appUser.id} via ${provider}`);
     setCurrentUser(appUser);
     setCurrentProvider(provider);
     setIsGuest(false);
@@ -360,7 +380,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const commonSignupSuccess = async (appUser: AppUser, provider: AuthProviderType | 'google') => {
-    console.log(`Auth: Common signup success for user ${appUser.id} via ${provider}`);
     setCurrentUser(appUser); 
     setCurrentProvider(provider);
     setIsGuest(false);
@@ -375,7 +394,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signupWithFirebase = async (email: string, password: string): Promise<AppUser | null> => {
     setLoading(true);
-    console.log(`Auth: Attempting Firebase signup for ${email}`);
     try {
       const userCredential = await createUserWithFirebase(firebaseAuth, email, password);
       const displayName = email.split('@')[0];
@@ -399,7 +417,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } else {
         toast({ title: 'Firebase Signup Failed', description: authError.message, variant: 'destructive' });
       }
-      console.error('Firebase Signup error:', authError.code, authError.message);
       return null;
     } finally {
       setLoading(false);
@@ -408,7 +425,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const loginWithFirebase = async (email: string, password: string): Promise<AppUser | null> => {
     setLoading(true);
-    console.log(`Auth: Attempting Firebase login for ${email}`);
     try {
       const userCredential = await signInWithFirebase(firebaseAuth, email, password);
       const appUser = mapFirebaseUserToAppUser(userCredential.user);
@@ -418,7 +434,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       const authError = error as FirebaseAuthError;
       toast({ title: 'Firebase Login Failed', description: authError.message, variant: 'destructive' });
-      console.error('Firebase Login error:', authError.code, authError.message);
       return null;
     } finally {
       setLoading(false);
@@ -427,7 +442,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signInWithGoogleFirebase = async (): Promise<AppUser | null> => {
     setLoading(true);
-    console.log(`Auth: Attempting Google Sign-In`);
     const provider = new GoogleAuthProvider();
     try {
       const result = await signInWithPopup(firebaseAuth, provider);
@@ -437,18 +451,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return appUser;
     } catch (error) {
       const authError = error as FirebaseAuthError;
-      
       if (authError.code === 'auth/account-exists-with-different-credential') {
         toast({
           title: 'Account Exists',
-          description: 'An account already exists with this email using a different sign-in method (e.g., email/password). Please sign in with that method.',
+          description: 'An account already exists with this email using a different sign-in method.',
           variant: 'destructive',
           duration: 8000,
         });
       } else {
         toast({ title: 'Google Sign-In Failed', description: authError.message, variant: 'destructive' });
       }
-      console.error('Google Sign-In error:', authError.code, authError.message);
       return null;
     } finally {
       setLoading(false);
@@ -458,7 +470,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signupWithSupabase = async (email: string, password: string): Promise<AppUser | null> => {
     setLoading(true);
-    console.log(`Auth: Attempting Supabase signup for ${email}`);
     try {
       const { data, error } = await supabase.auth.signUp({
         email,
@@ -479,7 +490,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       const authError = error as SupabaseAuthError;
       toast({ title: 'Supabase Signup Failed', description: authError.message, variant: 'destructive' });
-      console.error('Supabase Signup error:', authError.message);
       return null;
     } finally {
       setLoading(false);
@@ -488,7 +498,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const loginWithSupabase = async (email: string, password: string): Promise<AppUser | null> => {
     setLoading(true);
-    console.log(`Auth: Attempting Supabase login for ${email}`);
     try {
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
@@ -501,7 +510,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       const authError = error as SupabaseAuthError;
       toast({ title: 'Supabase Login Failed', description: authError.message, variant: 'destructive' });
-      console.error('Supabase Login error:', authError.message);
       return null;
     } finally {
       setLoading(false);
@@ -511,7 +519,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = async () => {
     setLoading(true);
     const providerToLogout = currentProvider; 
-    console.log(`Auth: Logging out user from ${providerToLogout || 'guest session'}`);
     try {
       if (providerToLogout === 'firebase' || providerToLogout === 'google') {
         await signOutFirebase(firebaseAuth);
@@ -523,7 +530,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       const authError = error as FirebaseAuthError | SupabaseAuthError;
       toast({ title: 'Logout Failed', description: authError.message, variant: 'destructive' });
-      console.error('Logout error:', authError.message);
     } finally {
       setCurrentUser(null);
       setCurrentProvider(null);
@@ -538,7 +544,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const enterGuestMode = useCallback(() => {
-    console.log("Auth: Entering guest mode.");
     setCurrentUser(null);
     setCurrentProvider(null);
     setIsGuest(true);
@@ -550,15 +555,192 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [router]);
 
   const exitGuestMode = useCallback(() => {
-    console.log("Auth: Exiting guest mode.");
     setIsGuest(false);
     if (typeof window !== 'undefined') {
         localStorage.removeItem(GUEST_MODE_STORAGE_KEY);
     }
-    // CurrentUser should already be null, provider null.
-    // The useEffect will then try to re-evaluate auth state.
     router.push('/login'); 
   }, [router]);
+
+  // --- Co-working Feature Functions ---
+  const createOrganization = async (name: string, description?: string): Promise<Organization | null> => {
+    if (!currentUser) {
+        toast({ title: "Authentication Required", description: "You must be logged in to create an organization.", variant: "destructive" });
+        return null;
+    }
+    setLoading(true);
+    try {
+        const newOrgRef = await addDoc(collection(db, "organizations"), {
+            name,
+            description: description || "",
+            ownerId: currentUser.id,
+            memberIds: [currentUser.id],
+            teamIds: [],
+            createdAt: serverTimestamp(),
+        });
+
+        const userDocRef = doc(db, "users", currentUser.id);
+        await updateDoc(userDocRef, {
+            organizationMemberships: arrayUnion(newOrgRef.id),
+            defaultOrganizationId: newOrgRef.id, // Set as default for the creator
+        });
+        
+        const newOrgData: Organization = {
+            id: newOrgRef.id, name, ownerId: currentUser.id, memberIds: [currentUser.id], teamIds: [], createdAt: new Date().toISOString(), description
+        };
+        
+        // Update local currentUser state
+        setCurrentUser(prevUser => prevUser ? ({
+            ...prevUser,
+            organizationMemberships: [...(prevUser.organizationMemberships || []), newOrgRef.id],
+            defaultOrganizationId: newOrgRef.id,
+        }) : null);
+
+        toast({ title: "Organization Created", description: `Organization "${name}" has been successfully created.` });
+        return newOrgData;
+    } catch (error) {
+        console.error("Error creating organization:", error);
+        toast({ title: "Creation Failed", description: "Could not create the organization.", variant: "destructive" });
+        return null;
+    } finally {
+        setLoading(false);
+    }
+  };
+
+  const createTeam = async (name: string, organizationId: string, description?: string): Promise<Team | null> => {
+    if (!currentUser) {
+        toast({ title: "Authentication Required", description: "You must be logged in to create a team.", variant: "destructive" });
+        return null;
+    }
+    if (!organizationId) {
+        toast({ title: "Organization Required", description: "A team must belong to an organization.", variant: "destructive" });
+        return null;
+    }
+    setLoading(true);
+    try {
+        const newTeamRef = await addDoc(collection(db, "teams"), {
+            name,
+            description: description || "",
+            organizationId,
+            memberIds: [currentUser.id],
+            adminIds: [currentUser.id], // Creator is admin
+            createdAt: serverTimestamp(),
+        });
+
+        // Update organization with new teamId
+        const orgDocRef = doc(db, "organizations", organizationId);
+        await updateDoc(orgDocRef, {
+            teamIds: arrayUnion(newTeamRef.id),
+        });
+
+        // Update user's team memberships
+        const userDocRef = doc(db, "users", currentUser.id);
+        await updateDoc(userDocRef, {
+            teamMemberships: arrayUnion(newTeamRef.id),
+        });
+        
+        const newTeamData: Team = {
+            id: newTeamRef.id, name, organizationId, memberIds: [currentUser.id], adminIds: [currentUser.id], createdAt: new Date().toISOString(), description
+        };
+        
+        setCurrentUser(prevUser => prevUser ? ({
+            ...prevUser,
+            teamMemberships: [...(prevUser.teamMemberships || []), newTeamRef.id],
+        }) : null);
+
+        toast({ title: "Team Created", description: `Team "${name}" has been successfully created.` });
+        return newTeamData;
+    } catch (error) {
+        console.error("Error creating team:", error);
+        toast({ title: "Creation Failed", description: "Could not create the team.", variant: "destructive" });
+        return null;
+    } finally {
+        setLoading(false);
+    }
+  };
+
+  const joinTeam = async (teamId: string): Promise<boolean> => {
+    // Placeholder: Actual implementation would involve invites/requests and permissions.
+    // For now, let's assume direct joining if allowed.
+    if (!currentUser) return false;
+    try {
+        const batch = writeBatch(db);
+        const teamDocRef = doc(db, "teams", teamId);
+        batch.update(teamDocRef, { memberIds: arrayUnion(currentUser.id) });
+        
+        const userDocRef = doc(db, "users", currentUser.id);
+        batch.update(userDocRef, { teamMemberships: arrayUnion(teamId) });
+        
+        await batch.commit();
+        
+        setCurrentUser(prevUser => prevUser ? ({
+            ...prevUser,
+            teamMemberships: [...new Set([...(prevUser.teamMemberships || []), teamId])],
+        }) : null);
+        toast({ title: "Joined Team", description: "Successfully joined the team." });
+        return true;
+    } catch (error) {
+        console.error("Error joining team:", error);
+        toast({ title: "Failed to Join", description: "Could not join the team.", variant: "destructive" });
+        return false;
+    }
+  };
+
+  const getUserOrganizations = async (): Promise<Organization[]> => {
+    if (!currentUser || !currentUser.organizationMemberships || currentUser.organizationMemberships.length === 0) {
+        return [];
+    }
+    try {
+        const orgsQuery = query(collection(db, "organizations"), where("memberIds", "array-contains", currentUser.id));
+        const querySnapshot = await getDocs(orgsQuery);
+        return querySnapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as Organization));
+    } catch (error) {
+        console.error("Error fetching user organizations:", error);
+        return [];
+    }
+  };
+
+  const getUserTeams = async (organizationId?: string): Promise<Team[]> => {
+    if (!currentUser || !currentUser.teamMemberships || currentUser.teamMemberships.length === 0) {
+        return [];
+    }
+    try {
+        let teamsQuery;
+        if (organizationId) {
+            teamsQuery = query(collection(db, "teams"), where("organizationId", "==", organizationId), where("memberIds", "array-contains", currentUser.id));
+        } else {
+            // Fetch all teams user is a member of, across all their orgs (could be less efficient if many teams)
+            // This implementation might need refinement based on how many teams a user can be in.
+            // For now, simple check against user's teamMemberships array.
+            if (currentUser.teamMemberships.length === 0) return [];
+            // Firestore 'in' query limit is 30. If user is in more teams, this needs batching.
+            teamsQuery = query(collection(db, "teams"), where("__name__", "in", currentUser.teamMemberships.slice(0,30) ));
+        }
+        const querySnapshot = await getDocs(teamsQuery);
+        // Further client-side filter if the main query was just by __name__
+        return querySnapshot.docs
+            .map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as Team))
+            .filter(team => team.memberIds.includes(currentUser.id));
+
+    } catch (error) {
+        console.error("Error fetching user teams:", error);
+        return [];
+    }
+  };
+  
+  const setCurrentOrganization = async (organizationId: string | null): Promise<void> => {
+    if (!currentUser) return;
+    try {
+        const userDocRef = doc(db, "users", currentUser.id);
+        await updateDoc(userDocRef, { defaultOrganizationId: organizationId });
+        setCurrentUser(prev => prev ? { ...prev, defaultOrganizationId: organizationId } : null);
+        toast({ title: "Active Organization Set", description: organizationId ? "Default organization updated." : "No default organization selected." });
+    } catch (error) {
+        console.error("Error setting current organization:", error);
+        toast({ title: "Update Failed", description: "Could not set active organization.", variant: "destructive" });
+    }
+  };
+
 
   const value = {
     currentUser,
@@ -573,6 +755,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     logout,
     enterGuestMode,
     exitGuestMode,
+    // Co-working
+    createOrganization,
+    createTeam,
+    joinTeam,
+    getUserOrganizations,
+    getUserTeams,
+    setCurrentOrganization,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

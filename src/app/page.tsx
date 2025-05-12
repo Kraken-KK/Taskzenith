@@ -21,17 +21,19 @@ import { AiChat } from "@/components/ai-chat";
 import { SettingsView } from '@/components/settings-view';
 import { PrioritizeTasksView } from '@/components/prioritize-tasks-view';
 import { SmartTaskCreationView } from '@/components/smart-task-creation-view';
-import { Bot, CheckSquare, ListTodo, Settings, Star, Menu, FolderKanban, PlusCircle, Edit3, Trash2, Palette, LogOut, Database, Zap, User, Chrome, FolderPlus, FolderSymlink, Folders } from "lucide-react"; // Added FolderPlus, FolderSymlink, Folders
+import { Bot, CheckSquare, ListTodo, Settings, Star, Menu, FolderKanban, PlusCircle, Edit3, Trash2, Palette, LogOut, Database, Zap, User, Chrome, FolderPlus, FolderSymlink, Folders, Users, Building, Briefcase } from "lucide-react"; // Added Users, Building for org/team
 import { useSidebar } from '@/components/ui/sidebar';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useTasks } from '@/contexts/TaskContext';
-import type { Board, BoardGroup } from '@/types';
+import type { Board, BoardGroup, Organization, Team } from '@/types';
 import { CreateBoardDialog } from '@/components/create-board-dialog';
 import { RenameBoardDialog } from '@/components/rename-board-dialog';
 import { BoardThemeCustomizer } from '@/components/board-theme-customizer';
 import { CreateBoardGroupDialog } from '@/components/create-board-group-dialog';
 import { RenameBoardGroupDialog } from '@/components/rename-board-group-dialog';
+import { CreateOrganizationDialog } from '@/components/create-organization-dialog';
+import { CreateTeamDialog } from '@/components/create-team-dialog';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -61,10 +63,13 @@ import { useToast } from '@/hooks/use-toast';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 
 
-type ActiveView = 'board' | 'ai-assistant' | 'prioritize' | 'smart-create' | 'settings';
+type ActiveView = 'board' | 'ai-assistant' | 'prioritize' | 'smart-create' | 'settings' | 'organizations' | 'teams';
 
 export default function Home() {
-  const { currentUser, loading: authLoading, logout, currentProvider, isGuest, exitGuestMode } = useAuth();
+  const { 
+    currentUser, loading: authLoading, logout, currentProvider, isGuest, exitGuestMode, 
+    createOrganization, createTeam, getUserOrganizations, getUserTeams, setCurrentOrganization 
+  } = useAuth();
   const router = useRouter();
   const [activeView, setActiveView] = useState<ActiveView>('board');
   const { isMobile } = useSidebar();
@@ -84,6 +89,13 @@ export default function Home() {
   const [groupToRename, setGroupToRename] = useState<BoardGroup | undefined>(undefined);
   const [targetGroupIdForNewBoard, setTargetGroupIdForNewBoard] = useState<string | null | undefined>(undefined);
 
+  // State for new co-working features
+  const [isCreateOrgDialogOpen, setIsCreateOrgDialogOpen] = useState(false);
+  const [isCreateTeamDialogOpen, setIsCreateTeamDialogOpen] = useState(false);
+  const [userOrganizations, setUserOrganizations] = useState<Organization[]>([]);
+  const [userTeams, setUserTeams] = useState<Team[]>([]);
+  const [selectedOrgForTeamCreation, setSelectedOrgForTeamCreation] = useState<string | null>(null);
+
 
   useEffect(() => {
     if (!authLoading && !currentUser && !isGuest) {
@@ -96,6 +108,30 @@ export default function Home() {
       setActiveBoardId(boards[0].id);
     }
   }, [activeBoardId, boards, setActiveBoardId, currentUser, isGuest]);
+
+  // Fetch user's organizations and teams
+  useEffect(() => {
+    if (currentUser && !isGuest) {
+        const fetchOrgAndTeams = async () => {
+            const orgs = await getUserOrganizations();
+            setUserOrganizations(orgs);
+            if (currentUser.defaultOrganizationId) {
+                const teams = await getUserTeams(currentUser.defaultOrganizationId);
+                setUserTeams(teams);
+            } else if (orgs.length > 0) {
+                // If no default org, but orgs exist, fetch teams for the first one as a fallback display
+                const teams = await getUserTeams(orgs[0].id);
+                setUserTeams(teams);
+            } else {
+                setUserTeams([]);
+            }
+        };
+        fetchOrgAndTeams();
+    } else {
+        setUserOrganizations([]);
+        setUserTeams([]);
+    }
+  }, [currentUser, isGuest, getUserOrganizations, getUserTeams]);
 
 
   if (authLoading || (!currentUser && !isGuest)) { 
@@ -111,12 +147,15 @@ export default function Home() {
 
   const getHeaderText = () => {
     const activeBoard = getActiveBoard();
+    const currentOrg = userOrganizations.find(org => org.id === currentUser?.defaultOrganizationId);
     switch (activeView) {
       case 'board': return activeBoard ? activeBoard.name : 'Kanban Board';
       case 'ai-assistant': return 'AI Assistant (Jack)';
       case 'prioritize': return 'AI Task Prioritization';
       case 'smart-create': return 'Smart Task Creation';
       case 'settings': return 'Settings';
+      case 'organizations': return 'My Organizations';
+      case 'teams': return currentOrg ? `Teams in ${currentOrg.name}` : 'My Teams';
       default: return 'TaskZenith';
     }
   };
@@ -127,7 +166,7 @@ export default function Home() {
   };
 
   const handleDeleteBoard = (boardId: string, boardName: string) => {
-    deleteBoard(boardId); // This will also handle removing from group in TaskContext
+    deleteBoard(boardId); 
     toast({
         title: "Board Deleted",
         description: `Board "${boardName}" has been successfully deleted.`,
@@ -155,8 +194,6 @@ export default function Home() {
   const handleMoveBoardToGroup = (boardId: string, groupId: string | null) => {
     if (groupId === "new_group") {
         setIsCreateGroupDialogOpen(true); 
-        // After group creation, we'd need to add the board. This might need a callback or state to manage.
-        // For now, let's assume user creates group then moves board.
         toast({ title: "Create Group", description: "Please create a new group first, then move the board."});
     } else if (groupId === "remove_from_group") {
         removeBoardFromGroup(boardId);
@@ -191,7 +228,21 @@ export default function Home() {
     return null;
   }
 
-  const ungroupedBoards = boards.filter(board => !board.groupId);
+  const handleOpenCreateTeamDialog = (orgId: string) => {
+    setSelectedOrgForTeamCreation(orgId);
+    setIsCreateTeamDialogOpen(true);
+  };
+  
+  const handleSetCurrentOrg = async (orgId: string | null) => {
+    await setCurrentOrganization(orgId);
+    // Refetch teams for the new current org
+    if (orgId) {
+        const teams = await getUserTeams(orgId);
+        setUserTeams(teams);
+    } else {
+        setUserTeams([]); // No default org, clear teams or fetch all teams user is part of
+    }
+  };
 
   return (
     <div className="flex h-screen bg-background text-foreground animate-fadeIn">
@@ -217,6 +268,73 @@ export default function Home() {
         </SidebarHeader>
         <SidebarContent className="flex-1 overflow-y-auto p-2">
           <SidebarMenu>
+            {/* Organizations Section */}
+            {!isGuest && currentUser && (
+              <SidebarMenuItem>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <SidebarMenuButton tooltip="Organizations" className="w-full hover:bg-sidebar-accent/80 dark:hover:bg-sidebar-accent/50">
+                      <Building /> Organizations
+                    </SidebarMenuButton>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent className="w-64 ml-2" side="right" align="start">
+                    <DropdownMenuLabel>My Organizations</DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    {userOrganizations.length === 0 && <DropdownMenuItem disabled>No organizations yet.</DropdownMenuItem>}
+                    {userOrganizations.map(org => (
+                      <DropdownMenuItem 
+                        key={org.id} 
+                        onClick={() => handleSetCurrentOrg(org.id)}
+                        className={cn(org.id === currentUser.defaultOrganizationId && "bg-accent text-accent-foreground")}
+                      >
+                        {org.name} {org.id === currentUser.defaultOrganizationId && "(Active)"}
+                      </DropdownMenuItem>
+                    ))}
+                    <DropdownMenuSeparator />
+                     <DropdownMenuItem onClick={() => setIsCreateOrgDialogOpen(true)}>
+                       <PlusCircle className="mr-2 h-4 w-4" /> Create New Organization
+                     </DropdownMenuItem>
+                     {currentUser.defaultOrganizationId && (
+                        <DropdownMenuItem onClick={() => handleSetCurrentOrg(null)}>
+                            Clear Default Organization
+                        </DropdownMenuItem>
+                     )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </SidebarMenuItem>
+            )}
+
+            {/* Teams Section (contextual to selected organization) */}
+            {!isGuest && currentUser && currentUser.defaultOrganizationId && (
+              <SidebarMenuItem>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <SidebarMenuButton tooltip="Teams" className="w-full hover:bg-sidebar-accent/80 dark:hover:bg-sidebar-accent/50">
+                      <Users /> Teams
+                    </SidebarMenuButton>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent className="w-64 ml-2" side="right" align="start">
+                    <DropdownMenuLabel>
+                        Teams in {userOrganizations.find(o => o.id === currentUser.defaultOrganizationId)?.name || 'Current Org'}
+                    </DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    {userTeams.length === 0 && <DropdownMenuItem disabled>No teams in this org yet.</DropdownMenuItem>}
+                    {userTeams.map(team => (
+                      <DropdownMenuItem key={team.id} /* onClick={() => setActiveTeam(team.id) - for future use} */ >
+                        {team.name}
+                      </DropdownMenuItem>
+                    ))}
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={() => currentUser.defaultOrganizationId && handleOpenCreateTeamDialog(currentUser.defaultOrganizationId)}>
+                      <PlusCircle className="mr-2 h-4 w-4" /> Create New Team
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </SidebarMenuItem>
+            )}
+            <SidebarSeparator />
+
+
             {/* Board Groups Section */}
             <SidebarMenuItem>
                 <DropdownMenu>
@@ -321,7 +439,12 @@ export default function Home() {
                                     className={cn("justify-between", board.id === activeBoardId && "bg-accent text-accent-foreground")}
                                     onClick={() => setActiveBoardId(board.id)}
                                 >
-                                    <span>{board.name} {board.groupId && <span className="text-xs text-muted-foreground ml-1">({boardGroups.find(g=>g.id===board.groupId)?.name})</span>}</span>
+                                    <span className="flex items-center">
+                                        {board.name}
+                                        {board.teamId && <Users className="h-3 w-3 ml-1.5 text-muted-foreground/70" title="Team Board" />}
+                                        {board.organizationId && !board.teamId && <Building className="h-3 w-3 ml-1.5 text-muted-foreground/70" title="Org Board"/>}
+                                        {board.groupId && <span className="text-xs text-muted-foreground ml-1">({boardGroups.find(g=>g.id===board.groupId)?.name})</span>}
+                                    </span>
                                 </DropdownMenuSubTrigger>
                                 <DropdownMenuPortal>
                                     <DropdownMenuSubContent className="w-52">
@@ -536,6 +659,49 @@ export default function Home() {
           {activeView === 'prioritize' && <PrioritizeTasksView />}
           {activeView === 'smart-create' && <SmartTaskCreationView />}
           {activeView === 'settings' && <SettingsView />}
+          {/* Placeholder for Organizations View */}
+          {activeView === 'organizations' && !isGuest && currentUser &&(
+            <div className="p-4">
+              <h2 className="text-2xl font-semibold mb-4">My Organizations</h2>
+              {userOrganizations.length === 0 ? (
+                <p>You are not part of any organization yet.</p>
+              ) : (
+                <ul className="space-y-2">
+                  {userOrganizations.map(org => (
+                    <li key={org.id} className="p-3 border rounded-md shadow-sm hover:bg-muted/30">
+                      {org.name} {org.id === currentUser.defaultOrganizationId && <span className="text-xs text-primary ml-2">(Default)</span>}
+                      <Button variant="link" size="sm" onClick={() => handleSetCurrentOrg(org.id)} className="ml-2">Set as Default</Button>
+                      <Button variant="link" size="sm" onClick={() => {setSelectedOrgForTeamCreation(org.id); setIsCreateTeamDialogOpen(true)}} className="ml-2">Add Team</Button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <Button onClick={() => setIsCreateOrgDialogOpen(true)} className="mt-4">
+                <Briefcase className="mr-2 h-4 w-4" /> Create Organization
+              </Button>
+            </div>
+          )}
+          {/* Placeholder for Teams View */}
+          {activeView === 'teams' && !isGuest && currentUser && currentUser.defaultOrganizationId && (
+            <div className="p-4">
+              <h2 className="text-2xl font-semibold mb-4">Teams in {userOrganizations.find(o => o.id === currentUser?.defaultOrganizationId)?.name}</h2>
+              {userTeams.length === 0 ? (
+                <p>No teams in this organization yet.</p>
+              ) : (
+                <ul className="space-y-2">
+                  {userTeams.map(team => (
+                    <li key={team.id} className="p-3 border rounded-md shadow-sm">
+                      {team.name}
+                      {/* Add join/view team button here later */}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <Button onClick={() => currentUser.defaultOrganizationId && handleOpenCreateTeamDialog(currentUser.defaultOrganizationId)} className="mt-4">
+                <Users className="mr-2 h-4 w-4" /> Create Team
+              </Button>
+            </div>
+          )}
         </main>
       </SidebarInset>
       <CreateBoardDialog 
@@ -547,6 +713,22 @@ export default function Home() {
       <BoardThemeCustomizer board={boardToCustomize} open={isThemeCustomizerOpen} onOpenChange={setIsThemeCustomizerOpen} />
       <CreateBoardGroupDialog open={isCreateGroupDialogOpen} onOpenChange={setIsCreateGroupDialogOpen} />
       <RenameBoardGroupDialog group={groupToRename} open={isRenameGroupDialogOpen} onOpenChange={setIsRenameGroupDialogOpen} />
+      {/* Co-working Dialogs */}
+      <CreateOrganizationDialog 
+        open={isCreateOrgDialogOpen} 
+        onOpenChange={(isOpen) => {
+            setIsCreateOrgDialogOpen(isOpen);
+            if(isOpen === false) getUserOrganizations().then(setUserOrganizations); // Refresh list on close
+        }}
+      />
+      <CreateTeamDialog
+        open={isCreateTeamDialogOpen}
+        onOpenChange={(isOpen) => {
+            setIsCreateTeamDialogOpen(isOpen);
+            if(isOpen === false && selectedOrgForTeamCreation) getUserTeams(selectedOrgForTeamCreation).then(setUserTeams); // Refresh list on close
+        }}
+        organizationId={selectedOrgForTeamCreation}
+      />
     </div>
   );
 }

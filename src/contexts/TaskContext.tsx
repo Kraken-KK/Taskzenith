@@ -1,7 +1,7 @@
 // src/contexts/TaskContext.tsx
 'use client';
 
-import type { Task, Column, ChecklistItem, Board, BoardTheme, BoardGroup } from '@/types';
+import type { Task, Column, ChecklistItem, Board, BoardTheme, BoardGroup, Organization, Team } from '@/types';
 import type { ReactNode } from 'react';
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { useToast } from "@/hooks/use-toast";
@@ -51,6 +51,7 @@ const assignTaskStatusToColumns = (columns: Column[]): Column[] => {
       dependencies: task.dependencies || [],
       tags: task.tags || [],
       createdAt: task.createdAt || formatISO(new Date()),
+      assignedTo: task.assignedTo || [],
     }))
   }));
 };
@@ -62,6 +63,9 @@ const initialDefaultBoardForGuest = (): Board => ({
     createdAt: formatISO(new Date()),
     theme: {},
     groupId: null,
+    organizationId: null,
+    teamId: null,
+    isPublic: false,
 });
 
 
@@ -70,11 +74,13 @@ interface TaskContextType {
   activeBoardId: string | null;
   setActiveBoardId: (boardId: string | null) => void;
   getActiveBoard: () => Board | undefined;
-  addBoard: (name: string, groupId?: string | null) => Board | undefined;
+  addBoard: (name: string, groupId?: string | null, organizationId?: string | null, teamId?: string | null) => Board | undefined;
   deleteBoard: (boardId: string) => void;
   updateBoardName: (boardId: string, newName: string) => void;
   updateBoardTheme: (boardId: string, theme: Partial<BoardTheme>) => void;
   updateBoardGroupId: (boardId: string, groupId: string | null) => void;
+  updateBoardCollaboration: (boardId: string, orgId: string | null, teamId: string | null) => void;
+
   
   boardGroups: BoardGroup[];
   addBoardGroup: (name: string) => BoardGroup | undefined;
@@ -83,7 +89,7 @@ interface TaskContextType {
   addBoardToGroup: (boardId: string, groupId: string) => void;
   removeBoardFromGroup: (boardId: string) => void; // Simplified: just removes from any group
 
-  addTask: (taskData: Omit<Task, 'id' | 'status' | 'createdAt' | 'dependencies' | 'checklist' | 'tags'> & Partial<Pick<Task, 'dependencies' | 'checklist' | 'tags' | 'description' | 'deadline'>>, targetColumnId?: Column['id']) => void;
+  addTask: (taskData: Omit<Task, 'id' | 'status' | 'createdAt' | 'dependencies' | 'checklist' | 'tags' | 'assignedTo'> & Partial<Pick<Task, 'dependencies' | 'checklist' | 'tags' | 'description' | 'deadline' | 'assignedTo'>>, targetColumnId?: Column['id']) => void;
   moveTask: (taskId: string, sourceColumnId: Column['id'], targetColumnId: Column['id'], isBetaModeActive: boolean) => { task: Task | null, automated: boolean };
   deleteTask: (taskId: string, columnId: Column['id']) => void;
   updateTask: (updatedTaskData: Partial<Task> & { id: string }) => void;
@@ -115,21 +121,17 @@ export function TaskProvider({ children }: { children: ReactNode }) {
   // Load data from Firestore for logged-in user or localStorage for guest
   useEffect(() => {
     const loadData = async () => {
-      console.log("TaskContext: Attempting to load data. AuthLoading:", authLoading, "CurrentUser:", !!currentUser, "IsGuest:", isGuest);
       setIsLoadingData(true);
       if (authLoading) {
-        console.log("TaskContext: Auth is loading, deferring data load.");
         return; 
       }
 
       if (currentUser && !isGuest) { 
-        console.log(`TaskContext: Logged-in user (${currentUser.id}). Loading data from Firestore.`);
         const userDocRef = doc(db, 'users', currentUser.id);
         try {
           const userDocSnap = await getDoc(userDocRef);
           if (userDocSnap.exists()) {
             const userData = userDocSnap.data();
-            console.log("TaskContext: User document found in Firestore:", userData);
             const firestoreBoards = (userData.boards || []) as Board[];
              const sanitizedBoards = firestoreBoards.map(board => ({
                 ...board,
@@ -149,15 +151,18 @@ export function TaskProvider({ children }: { children: ReactNode }) {
                         checklist: task.checklist || [],
                         dependencies: task.dependencies || [],
                         tags: task.tags || [],
+                        assignedTo: task.assignedTo || [],
                     })) : [],
                 }))) : [],
                 createdAt: board.createdAt || formatISO(new Date()),
                 theme: board.theme || {},
-                groupId: board.groupId === undefined ? null : board.groupId, // Sanitize groupId
+                groupId: board.groupId === undefined ? null : board.groupId,
+                organizationId: board.organizationId === undefined ? null : board.organizationId,
+                teamId: board.teamId === undefined ? null : board.teamId,
+                isPublic: board.isPublic === undefined ? false : board.isPublic,
             }));
 
             setBoards(sanitizedBoards);
-            console.log("TaskContext: Boards sanitized and set from Firestore:", sanitizedBoards.length, "boards");
 
             const firestoreBoardGroups = (userData.boardGroups || []) as BoardGroup[];
             const sanitizedBoardGroups = firestoreBoardGroups.map(group => ({
@@ -168,26 +173,19 @@ export function TaskProvider({ children }: { children: ReactNode }) {
                 createdAt: group.createdAt || formatISO(new Date()),
             }));
             setBoardGroups(sanitizedBoardGroups);
-            console.log("TaskContext: Board groups sanitized and set from Firestore:", sanitizedBoardGroups.length, "groups");
-
 
             const firestoreActiveBoardId = userData.activeBoardId as string | null;
             if (firestoreActiveBoardId && sanitizedBoards.find(b => b.id === firestoreActiveBoardId)) {
               setActiveBoardIdState(firestoreActiveBoardId);
-              console.log("TaskContext: Active board ID set from Firestore:", firestoreActiveBoardId);
             } else if (sanitizedBoards.length > 0) {
               setActiveBoardIdState(sanitizedBoards[0].id);
-              console.log("TaskContext: Active board ID set to first available board:", sanitizedBoards[0].id);
               if (firestoreActiveBoardId !== sanitizedBoards[0].id) {
-                console.log("TaskContext: Updating Firestore activeBoardId because it was invalid or not set.");
                 await updateDoc(userDocRef, { activeBoardId: sanitizedBoards[0].id });
               }
             } else {
               setActiveBoardIdState(null);
-              console.log("TaskContext: No boards found for user, activeBoardId set to null.");
             }
           } else {
-            console.warn("TaskContext: User document not found in Firestore for logged-in user. This should be handled by AuthContext creating the user doc with defaults.");
             setBoards([]); 
             setBoardGroups([]);
             setActiveBoardIdState(null);
@@ -200,7 +198,6 @@ export function TaskProvider({ children }: { children: ReactNode }) {
           setActiveBoardIdState(null);
         }
       } else if (isGuest) { 
-        console.log("TaskContext: Guest user. Loading data from localStorage.");
         const guestBoardsKey = 'kanbanBoards-guestSession';
         const guestActiveIdKey = 'activeKanbanBoardId-guestSession';
         const guestBoardGroupsKey = 'boardGroups-guestSession';
@@ -227,14 +224,17 @@ export function TaskProvider({ children }: { children: ReactNode }) {
                         checklist: task.checklist || [],
                         dependencies: task.dependencies || [],
                         tags: task.tags || [],
+                        assignedTo: task.assignedTo || [],
                     })) : [],
                 }))) : [],
                 createdAt: board.createdAt || formatISO(new Date()),
                 theme: board.theme || {},
                 groupId: board.groupId === undefined ? null : board.groupId,
+                organizationId: board.organizationId === undefined ? null : board.organizationId,
+                teamId: board.teamId === undefined ? null : board.teamId,
+                isPublic: board.isPublic === undefined ? false : board.isPublic,
             }));
             setBoards(sanitizedBoards);
-            console.log("TaskContext: Boards set from localStorage for guest:", sanitizedBoards.length, "boards");
 
             const savedActiveId = localStorage.getItem(guestActiveIdKey);
             if (savedActiveId && sanitizedBoards.find(b => b.id === savedActiveId)) {
@@ -245,7 +245,6 @@ export function TaskProvider({ children }: { children: ReactNode }) {
                const defaultGuestBoard = initialDefaultBoardForGuest();
                setBoards([defaultGuestBoard]);
                setActiveBoardIdState(defaultGuestBoard.id);
-               console.log("TaskContext: No boards in localStorage for guest, initialized with default guest board.");
             }
           } catch (e) {
             console.error("TaskContext: Failed to parse guest boards from localStorage", e);
@@ -257,7 +256,6 @@ export function TaskProvider({ children }: { children: ReactNode }) {
           const defaultGuestBoard = initialDefaultBoardForGuest();
           setBoards([defaultGuestBoard]);
           setActiveBoardIdState(defaultGuestBoard.id);
-          console.log("TaskContext: No boards in localStorage for guest, initialized with default guest board.");
         }
         const savedBoardGroups = localStorage.getItem(guestBoardGroupsKey);
         if(savedBoardGroups) {
@@ -271,7 +269,6 @@ export function TaskProvider({ children }: { children: ReactNode }) {
                     createdAt: g.createdAt || formatISO(new Date())
                 })));
             } catch (e) {
-                 console.error("TaskContext: Failed to parse guest board groups from localStorage", e);
                  setBoardGroups([]);
             }
         } else {
@@ -279,13 +276,11 @@ export function TaskProvider({ children }: { children: ReactNode }) {
         }
 
       } else { 
-        console.log("TaskContext: No user and not guest. Clearing boards and groups.");
         setBoards([]);
         setBoardGroups([]);
         setActiveBoardIdState(null);
       }
       setIsLoadingData(false);
-      console.log("TaskContext: Data loading finished.");
     };
 
     loadData();
@@ -294,18 +289,19 @@ export function TaskProvider({ children }: { children: ReactNode }) {
   // Save data to Firestore for logged-in user or localStorage for guest
   useEffect(() => {
     if (isLoadingData || authLoading) {
-      console.log("TaskContext Save: Skipping save due to isLoadingData or authLoading.");
       return; 
     }
 
     const saveData = async () => {
       if (currentUser && !isGuest) { // Logged-in user
-        console.log(`TaskContext Save: Logged-in user (${currentUser.id}). Saving data to Firestore.`);
         const userDocRef = doc(db, 'users', currentUser.id);
         try {
            const boardsToSave = boards.map(board => ({
             ...board,
             groupId: board.groupId === undefined ? null : board.groupId,
+            organizationId: board.organizationId === undefined ? null : board.organizationId,
+            teamId: board.teamId === undefined ? null : board.teamId,
+            isPublic: board.isPublic === undefined ? false : board.isPublic,
             columns: board.columns.map(column => ({
               ...column,
               tasks: column.tasks.map(task => ({
@@ -313,17 +309,16 @@ export function TaskProvider({ children }: { children: ReactNode }) {
                 checklist: task.checklist || [],
                 dependencies: task.dependencies || [],
                 tags: task.tags || [],
+                assignedTo: task.assignedTo || [],
                 createdAt: task.createdAt || formatISO(new Date()),
               }))
             }))
           }));
           await updateDoc(userDocRef, { boards: boardsToSave, activeBoardId, boardGroups });
-          console.log("TaskContext Save: Data saved to Firestore for user", currentUser.id);
         } catch (error) {
           console.error("TaskContext Save: Error saving user data to Firestore:", error);
         }
       } else if (isGuest) { // Guest user
-        console.log("TaskContext Save: Guest user. Saving data to localStorage.");
         const guestBoardsKey = 'kanbanBoards-guestSession';
         const guestActiveIdKey = 'activeKanbanBoardId-guestSession';
         const guestBoardGroupsKey = 'boardGroups-guestSession';
@@ -334,14 +329,12 @@ export function TaskProvider({ children }: { children: ReactNode }) {
         } else {
           localStorage.removeItem(guestActiveIdKey);
         }
-        console.log("TaskContext Save: Data saved to localStorage for guest.");
       }
     };
     saveData();
   }, [boards, activeBoardId, boardGroups, currentUser, isGuest, isLoadingData, authLoading, toast]);
   
   const setActiveBoardId = useCallback((boardId: string | null) => {
-    console.log("TaskContext: Setting active board ID to:", boardId);
     setActiveBoardIdState(boardId);
   }, []);
 
@@ -349,7 +342,12 @@ export function TaskProvider({ children }: { children: ReactNode }) {
     return boards.find(b => b.id === activeBoardId);
   }, [boards, activeBoardId]);
 
-  const addBoard = (name: string, groupId: string | null = null): Board | undefined => {
+  const addBoard = (
+    name: string, 
+    groupId: string | null = null, 
+    organizationId: string | null = null, 
+    teamId: string | null = null
+  ): Board | undefined => {
     if (!currentUser && !isGuest) {
         toast({ title: "Action Denied", description: "You must be logged in or in guest mode to add a board.", variant: "destructive"});
         return undefined;
@@ -366,6 +364,9 @@ export function TaskProvider({ children }: { children: ReactNode }) {
       createdAt: formatISO(new Date()),
       theme: {},
       groupId: groupId,
+      organizationId: organizationId || (currentUser?.defaultOrganizationId ?? null), // Auto-associate with user's default org
+      teamId: teamId,
+      isPublic: false,
     };
     setBoards(prevBoards => [...prevBoards, newBoard]);
     if (groupId) {
@@ -375,7 +376,6 @@ export function TaskProvider({ children }: { children: ReactNode }) {
     }
     setActiveBoardId(newBoard.id); 
     toast({ title: "Board Created", description: `Board "${name}" has been created.`});
-    console.log("TaskContext: Board added:", newBoard.id, name, "to group:", groupId);
     return newBoard;
   };
 
@@ -387,7 +387,6 @@ export function TaskProvider({ children }: { children: ReactNode }) {
       if (activeBoardId === boardId) { 
         setActiveBoardId(remainingBoards.length > 0 ? remainingBoards[0].id : null);
       }
-      // Remove board from any group
       if (boardToDelete?.groupId) {
           setBoardGroups(prevGroups => prevGroups.map(g => 
               g.id === boardToDelete.groupId 
@@ -398,7 +397,6 @@ export function TaskProvider({ children }: { children: ReactNode }) {
       return remainingBoards;
     });
     toast({ title: "Board Deleted", description: "The board has been deleted."});
-    console.log("TaskContext: Board deleted:", boardId);
   };
 
   const updateBoardName = (boardId: string, newName: string) => {
@@ -407,7 +405,6 @@ export function TaskProvider({ children }: { children: ReactNode }) {
       prevBoards.map(b => (b.id === boardId ? { ...b, name: newName } : b))
     );
     toast({ title: "Board Renamed", description: "Board name has been updated."});
-     console.log("TaskContext: Board renamed:", boardId, "to", newName);
   };
   
   const updateBoardTheme = (boardId: string, themeUpdate: Partial<BoardTheme>) => {
@@ -418,13 +415,20 @@ export function TaskProvider({ children }: { children: ReactNode }) {
       )
     );
      toast({ title: "Board Theme Updated", description: "Board appearance has been customized."});
-     console.log("TaskContext: Board theme updated for board:", boardId);
   };
 
   const updateBoardGroupId = (boardId: string, newGroupId: string | null) => {
     setBoards(prevBoards => prevBoards.map(board => 
       board.id === boardId ? { ...board, groupId: newGroupId } : board
     ));
+  };
+
+  const updateBoardCollaboration = (boardId: string, orgId: string | null, teamId: string | null) => {
+    setBoards(prevBoards => prevBoards.map(board =>
+      board.id === boardId ? { ...board, organizationId: orgId, teamId: teamId } : board
+    ));
+    const boardName = boards.find(b => b.id === boardId)?.name || "Board";
+    toast({ title: "Board Collaboration Updated", description: `Collaboration settings for "${boardName}" updated.` });
   };
 
   const addBoardGroup = (name: string): BoardGroup | undefined => {
@@ -440,34 +444,29 @@ export function TaskProvider({ children }: { children: ReactNode }) {
     };
     setBoardGroups(prev => [...prev, newGroup]);
     toast({ title: "Board Group Created", description: `Group "${name}" created.`});
-    console.log("TaskContext: Board group added:", newGroup.id, name);
     return newGroup;
   };
 
   const deleteBoardGroup = (groupId: string) => {
     if (!currentUser && !isGuest) return;
     setBoardGroups(prev => prev.filter(g => g.id !== groupId));
-    // Ungroup boards that were in this group
     setBoards(prevBoards => prevBoards.map(b => 
         b.groupId === groupId ? { ...b, groupId: null } : b
     ));
     toast({ title: "Board Group Deleted", description: "Group deleted. Boards are now ungrouped."});
-    console.log("TaskContext: Board group deleted:", groupId);
   };
 
   const updateBoardGroupName = (groupId: string, newName: string) => {
     if (!currentUser && !isGuest) return;
     setBoardGroups(prev => prev.map(g => g.id === groupId ? { ...g, name: newName } : g));
     toast({ title: "Board Group Renamed", description: "Group name updated."});
-    console.log("TaskContext: Board group renamed:", groupId, "to", newName);
   };
 
   const addBoardToGroup = (boardId: string, targetGroupId: string) => {
     if (!currentUser && !isGuest) return;
-    // First, remove board from any existing group it might be in (both from board object and group's boardIds)
     setBoards(prevBoards => prevBoards.map(b => {
         if (b.id === boardId) {
-            if (b.groupId && b.groupId !== targetGroupId) { // If it was in a different group
+            if (b.groupId && b.groupId !== targetGroupId) { 
                 setBoardGroups(prevGroups => prevGroups.map(g => 
                     g.id === b.groupId ? { ...g, boardIds: g.boardIds.filter(id => id !== boardId) } : g
                 ));
@@ -476,23 +475,20 @@ export function TaskProvider({ children }: { children: ReactNode }) {
         }
         return b;
     }));
-
-    // Then, add board to the target group's boardIds list
     setBoardGroups(prevGroups => prevGroups.map(g => 
         g.id === targetGroupId 
-            ? { ...g, boardIds: [...new Set([...g.boardIds, boardId])] } // Use Set to ensure no duplicates
+            ? { ...g, boardIds: [...new Set([...g.boardIds, boardId])] } 
             : g
     ));
     const boardName = boards.find(b => b.id === boardId)?.name || "Board";
     const groupName = boardGroups.find(g => g.id === targetGroupId)?.name || "Group";
     toast({ title: "Board Moved to Group", description: `"${boardName}" added to group "${groupName}".` });
-    console.log("TaskContext: Board", boardId, "added to group", targetGroupId);
   };
 
   const removeBoardFromGroup = (boardId: string) => {
     if (!currentUser && !isGuest) return;
     const board = boards.find(b => b.id === boardId);
-    if (!board || !board.groupId) return; // Not in a group or board not found
+    if (!board || !board.groupId) return; 
     
     const sourceGroupId = board.groupId;
     
@@ -503,14 +499,12 @@ export function TaskProvider({ children }: { children: ReactNode }) {
         g.id === sourceGroupId ? { ...g, boardIds: g.boardIds.filter(id => id !== boardId) } : g
     ));
     toast({ title: "Board Ungrouped", description: `"${board.name}" removed from its group.`});
-    console.log("TaskContext: Board", boardId, "removed from group", sourceGroupId);
   };
 
 
   const executeOnActiveBoard = <T,>(operation: (board: Board) => { updatedBoard?: Board, result?: T }): T | undefined => {
     if ((!currentUser && !isGuest) || !activeBoardId) {
       toast({ title: "Action Denied", description: "Operation requires an active board and user/guest session.", variant: "destructive"});
-      console.warn("TaskContext: executeOnActiveBoard called without active user/guest or active board.");
       return undefined;
     }
     
@@ -519,7 +513,6 @@ export function TaskProvider({ children }: { children: ReactNode }) {
         const boardIndex = prevBoards.findIndex(b => b.id === activeBoardId);
         if (boardIndex === -1) {
             toast({ title: "Error", description: "Active board not found.", variant: "destructive"});
-            console.error("TaskContext: Active board not found in executeOnActiveBoard. ID:", activeBoardId);
             return prevBoards;
         }
         const currentActiveBoard = prevBoards[boardIndex];
@@ -536,12 +529,11 @@ export function TaskProvider({ children }: { children: ReactNode }) {
     return resultFromOperation;
   };
 
-  const addTask = (taskData: Omit<Task, 'id' | 'status' | 'createdAt'> & Partial<Pick<Task, 'dependencies' | 'checklist' | 'tags' | 'description' | 'deadline'>>, targetColumnIdInput?: Column['id']) => {
+  const addTask = (taskData: Omit<Task, 'id' | 'status' | 'createdAt'> & Partial<Pick<Task, 'dependencies' | 'checklist' | 'tags' | 'description' | 'deadline' | 'assignedTo'>>, targetColumnIdInput?: Column['id']) => {
     executeOnActiveBoard(board => {
       const finalTargetColumnId = targetColumnIdInput || (board.columns.length > 0 ? board.columns[0].id : undefined);
       if (!finalTargetColumnId) {
         toast({ title: "Error Adding Task", description: "No columns available in this board.", variant: "destructive" });
-        console.error("TaskContext: Cannot add task, no target column ID and no columns on board.");
         return {};
       }
 
@@ -553,6 +545,7 @@ export function TaskProvider({ children }: { children: ReactNode }) {
         description: taskData.description || undefined,
         tags: taskData.tags || [],
         checklist: taskData.checklist || [],
+        assignedTo: taskData.assignedTo || [],
         createdAt: formatISO(new Date()),
       };
       
@@ -563,7 +556,6 @@ export function TaskProvider({ children }: { children: ReactNode }) {
         return col;
       });
       toast({ title: "Task Added!", description: `Task "${newTask.content}" added.` });
-      console.log("TaskContext: Task added:", newTask.id, "to column", finalTargetColumnId);
       return { updatedBoard: { ...board, columns: updatedBoardColumns } };
     });
   };
@@ -578,13 +570,11 @@ export function TaskProvider({ children }: { children: ReactNode }) {
       const targetCol = newBoardColumns.find(col => col.id === targetColumnId);
 
       if (!sourceCol || !targetCol) {
-        console.error("TaskContext: Source or target column not found for moveTask.");
         return { result: { task: null, automated: false }};
       }
 
       const taskIndex = sourceCol.tasks.findIndex(task => task.id === taskId);
       if (taskIndex === -1) {
-        console.error("TaskContext: Task not found in source column for moveTask.");
         return { result: { task: null, automated: false }};
       }
       
@@ -600,7 +590,6 @@ export function TaskProvider({ children }: { children: ReactNode }) {
       }
       toast({ title: "Task Moved", description: `Task "${movedTask?.content}" moved to "${targetCol.title}".`});
       if (automationApplied) toast({ title: "Automation Applied", description: "Checklist items marked complete."});
-      console.log("TaskContext: Task moved:", taskId, "from", sourceColumnId, "to", targetColumnId, "Automation:", automationApplied);
       return { updatedBoard: { ...board, columns: newBoardColumns }, result: { task: movedTask, automated: automationApplied } };
     });
     return result || { task: null, automated: false };
@@ -615,7 +604,6 @@ export function TaskProvider({ children }: { children: ReactNode }) {
         return col;
       });
       toast({ title: "Task Deleted" });
-      console.log("TaskContext: Task deleted:", taskId, "from column", columnId);
       return { updatedBoard: { ...board, columns: updatedBoardColumns } };
     });
   };
@@ -627,7 +615,6 @@ export function TaskProvider({ children }: { children: ReactNode }) {
         tasks: col.tasks.map(task => task.id === updatedTaskData.id ? { ...task, ...updatedTaskData } : task)
       }));
       toast({ title: "Task Updated" });
-      console.log("TaskContext: Task updated:", updatedTaskData.id);
       return { updatedBoard: { ...board, columns: updatedBoardColumns } };
     });
   };
@@ -651,7 +638,6 @@ export function TaskProvider({ children }: { children: ReactNode }) {
     executeOnActiveBoard(board => {
       const newColumn: Column = { id: generateId('col'), title, tasks: [] };
       toast({ title: "Column Added", description: `Column "${title}" created.` });
-      console.log("TaskContext: Column added:", newColumn.id, title);
       return { updatedBoard: { ...board, columns: [...board.columns, newColumn] } };
     });
   };
@@ -660,7 +646,6 @@ export function TaskProvider({ children }: { children: ReactNode }) {
      executeOnActiveBoard(board => {
         const updatedCols = board.columns.map(col => col.id === columnId ? { ...col, title: newTitle } : col);
         toast({ title: "Column Updated", description: "Column title changed."});
-        console.log("TaskContext: Column title updated:", columnId, "to", newTitle);
         return { updatedBoard: { ...board, columns: updatedCols } };
      });
   };
@@ -669,7 +654,6 @@ export function TaskProvider({ children }: { children: ReactNode }) {
     executeOnActiveBoard(board => {
       const updatedCols = board.columns.filter(col => col.id !== columnId);
       toast({ title: "Column Deleted", description: "Column and its tasks have been deleted."});
-      console.log("TaskContext: Column deleted:", columnId);
       return { updatedBoard: { ...board, columns: updatedCols } };
     });
   };
@@ -678,7 +662,6 @@ export function TaskProvider({ children }: { children: ReactNode }) {
      executeOnActiveBoard(board => {
         const updatedCols = board.columns.map(col => col.id === columnId ? { ...col, wipLimit: limit } : col);
         toast({ title: "WIP Limit Updated" });
-        console.log("TaskContext: Column WIP limit updated:", columnId, "to", limit);
         return { updatedBoard: { ...board, columns: updatedCols } };
      });
   };
@@ -700,7 +683,6 @@ export function TaskProvider({ children }: { children: ReactNode }) {
         }
         return col;
       });
-      console.log("TaskContext: Checklist item added to task", taskId);
       return { updatedBoard: { ...board, columns: updatedCols } };
     });
   };
@@ -719,7 +701,6 @@ export function TaskProvider({ children }: { children: ReactNode }) {
             }
             return col;
         });
-        console.log("TaskContext: Checklist item toggled for task", taskId, "item", itemId);
         return { updatedBoard: { ...board, columns: updatedCols } };
      });
   };
@@ -738,7 +719,6 @@ export function TaskProvider({ children }: { children: ReactNode }) {
             }
             return col;
         });
-        console.log("TaskContext: Checklist item deleted for task", taskId, "item", itemId);
         return { updatedBoard: { ...board, columns: updatedCols } };
      });
   };
@@ -757,7 +737,6 @@ export function TaskProvider({ children }: { children: ReactNode }) {
             }
             return col;
         });
-        console.log("TaskContext: Checklist item text updated for task", taskId, "item", itemId);
         return { updatedBoard: { ...board, columns: updatedCols } };
      });
   };
@@ -766,7 +745,7 @@ export function TaskProvider({ children }: { children: ReactNode }) {
      return (
       <TaskContext.Provider value={{ 
         boards: [], activeBoardId: null, setActiveBoardId: () => {}, getActiveBoard: () => undefined, 
-        addBoard: () => undefined, deleteBoard: () => {}, updateBoardName: () => {}, updateBoardTheme: () => {}, updateBoardGroupId: () => {},
+        addBoard: () => undefined, deleteBoard: () => {}, updateBoardName: () => {}, updateBoardTheme: () => {}, updateBoardGroupId: () => {}, updateBoardCollaboration: () => {},
         boardGroups: [], addBoardGroup: () => undefined, deleteBoardGroup: () => {}, updateBoardGroupName: () => {}, addBoardToGroup: () => {}, removeBoardFromGroup: () => {},
         addTask: () => {}, moveTask: () => ({task: null, automated: false }), deleteTask: () => {}, updateTask: () => {}, getTaskById: () => undefined, getAllTasksOfActiveBoard: () => [],
         addColumn: () => {}, updateColumnTitle: () => {}, deleteColumn: () => {}, updateColumnWipLimit: () => {},
@@ -785,7 +764,7 @@ export function TaskProvider({ children }: { children: ReactNode }) {
 
   return (
     <TaskContext.Provider value={{ 
-        boards, activeBoardId, setActiveBoardId, getActiveBoard, addBoard, deleteBoard, updateBoardName, updateBoardTheme, updateBoardGroupId,
+        boards, activeBoardId, setActiveBoardId, getActiveBoard, addBoard, deleteBoard, updateBoardName, updateBoardTheme, updateBoardGroupId, updateBoardCollaboration,
         boardGroups, addBoardGroup, deleteBoardGroup, updateBoardGroupName, addBoardToGroup, removeBoardFromGroup,
         addTask, moveTask, deleteTask, updateTask, getTaskById, getAllTasksOfActiveBoard,
         addColumn, updateColumnTitle, deleteColumn, updateColumnWipLimit,
