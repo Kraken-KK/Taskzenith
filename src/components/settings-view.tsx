@@ -36,7 +36,7 @@ export function SettingsView() {
   const { theme, setTheme } = useTheme();
   const { isBetaModeEnabled, setIsBetaModeEnabled, interactionStyle, setInteractionStyle } = useSettings();
   const { 
-    currentUser, logout, loading: authLoading, currentProvider, 
+    currentUser, logout, loading: authLoading, currentProvider, isGuest, // Added isGuest here
     getUserOrganizations, getUserTeams, createOrganization, createTeam, setCurrentOrganization 
   } = useAuth(); 
 
@@ -47,7 +47,7 @@ export function SettingsView() {
   const [selectedOrgForTeamCreation, setSelectedOrgForTeamCreation] = useState<string | null>(null);
 
   const fetchUserOrgsAndTeams = async () => {
-    if (currentUser) {
+    if (currentUser && !isGuest) {
       const orgs = await getUserOrganizations();
       setUserOrganizations(orgs);
       if (currentUser.defaultOrganizationId) {
@@ -67,7 +67,7 @@ export function SettingsView() {
     if (currentUser && !isGuest) {
       fetchUserOrgsAndTeams();
     }
-  }, [currentUser, isGuest]); // isGuest not defined here, assuming it might be from useAuth if needed
+  }, [currentUser, isGuest]); 
 
   const handleSetCurrentOrg = async (orgId: string | null) => {
     await setCurrentOrganization(orgId);
@@ -314,3 +314,4 @@ export function SettingsView() {
     </ScrollArea>
   );
 }
+
