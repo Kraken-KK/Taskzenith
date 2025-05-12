@@ -18,7 +18,7 @@ import {
 import { doc, getDoc, setDoc, updateDoc, serverTimestamp, Timestamp } from 'firebase/firestore'; // Firestore imports
 import { useToast } from '@/hooks/use-toast';
 import { useRouter } from 'next/navigation';
-import type { Board, Task, Column } from '@/types'; // Ensure types are available
+import type { Board, Task, Column, BoardGroup } from '@/types'; // Ensure types are available
 import { formatISO } from 'date-fns';
 import type { InteractionStyle } from './SettingsContext';
 import type { MessageHistoryItem } from '@/ai/flows/chat-flow';
@@ -55,6 +55,7 @@ const getDefaultBoardForNewUser = (): Board => ({
   columns: assignTaskStatusToDefaultColumns(getDefaultColumnsForNewUser()),
   createdAt: formatISO(new Date()),
   theme: {},
+  groupId: null, // Initialize groupId
 });
 
 const defaultUserSettings = {
@@ -178,6 +179,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           activeBoardId: defaultBoard.id,
           settings: defaultUserSettings,
           aiChatHistory: defaultAiChatHistory,
+          boardGroups: [] as BoardGroup[], // Initialize boardGroups
         };
         console.log(`Firestore Init: Data for new user ${appUser.id}:`, JSON.stringify(newUserDocumentData, null, 2));
         await setDoc(userDocRef, newUserDocumentData);
@@ -191,16 +193,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         // Ensure essential structures exist
         if (!userData.boards || !Array.isArray(userData.boards) || userData.boards.length === 0) {
-          updates.boards = [defaultBoard];
+          updates.boards = [defaultBoard]; // defaultBoard already includes groupId: null
           updates.activeBoardId = defaultBoard.id;
           needsUpdate = true;
           console.log(`Firestore Init: User ${appUser.id} - boards missing or empty. Adding default board.`);
-        } else if (!userData.activeBoardId && updates.boards && updates.boards.length > 0) {
-          // If boards were just added, ensure activeBoardId is also set
+        } else {
+          // Ensure all existing boards have a groupId
+          updates.boards = userData.boards.map((board: Board) => ({
+            ...board,
+            groupId: board.groupId === undefined ? null : board.groupId,
+          }));
+          if (JSON.stringify(updates.boards) !== JSON.stringify(userData.boards)) {
+             needsUpdate = true;
+             console.log(`Firestore Init: User ${appUser.id} - updated boards with groupId.`);
+          }
+        }
+        
+        if (!userData.activeBoardId && updates.boards && updates.boards.length > 0) {
           updates.activeBoardId = updates.boards[0].id;
-          needsUpdate = true; // Technically covered by above, but explicit
-        } else if (userData.activeBoardId && !userData.boards.find((b: Board) => b.id === userData.activeBoardId) && userData.boards.length > 0) {
-          // Active board ID is invalid, set to first available board
+          needsUpdate = true; 
+        } else if (userData.activeBoardId && userData.boards && !userData.boards.find((b: Board) => b.id === userData.activeBoardId) && userData.boards.length > 0) {
           updates.activeBoardId = userData.boards[0].id;
           needsUpdate = true;
           console.log(`Firestore Init: User ${appUser.id} - invalid activeBoardId. Resetting to first board.`);
@@ -216,6 +228,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           updates.aiChatHistory = defaultAiChatHistory;
           needsUpdate = true;
           console.log(`Firestore Init: User ${appUser.id} - AI chat history missing. Adding default history.`);
+        }
+        if (!userData.boardGroups || !Array.isArray(userData.boardGroups)) { // Initialize boardGroups if missing
+          updates.boardGroups = [];
+          needsUpdate = true;
+          console.log(`Firestore Init: User ${appUser.id} - boardGroups missing. Adding empty array.`);
         }
         
         // Update user profile info if changed
@@ -568,4 +585,3 @@ export function useAuth() {
   }
   return context;
 }
-

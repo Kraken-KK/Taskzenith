@@ -14,21 +14,24 @@ import {
   SidebarInset,
   SidebarTrigger,
   SidebarFooter,
+  SidebarSeparator,
 } from "@/components/ui/sidebar";
 import { KanbanBoard } from "@/components/kanban-board";
 import { AiChat } from "@/components/ai-chat";
 import { SettingsView } from '@/components/settings-view';
 import { PrioritizeTasksView } from '@/components/prioritize-tasks-view';
 import { SmartTaskCreationView } from '@/components/smart-task-creation-view';
-import { Bot, CheckSquare, ListTodo, Settings, Star, Menu, FolderKanban, PlusCircle, Edit3, Trash2, Palette, LogOut, Database, Zap, User, Chrome } from "lucide-react"; // Added Chrome
+import { Bot, CheckSquare, ListTodo, Settings, Star, Menu, FolderKanban, PlusCircle, Edit3, Trash2, Palette, LogOut, Database, Zap, User, Chrome, FolderPlus, FolderSymlink, Folders } from "lucide-react"; // Added FolderPlus, FolderSymlink, Folders
 import { useSidebar } from '@/components/ui/sidebar';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useTasks } from '@/contexts/TaskContext';
-import type { Board } from '@/types';
+import type { Board, BoardGroup } from '@/types';
 import { CreateBoardDialog } from '@/components/create-board-dialog';
 import { RenameBoardDialog } from '@/components/rename-board-dialog';
 import { BoardThemeCustomizer } from '@/components/board-theme-customizer';
+import { CreateBoardGroupDialog } from '@/components/create-board-group-dialog';
+import { RenameBoardGroupDialog } from '@/components/rename-board-group-dialog';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -39,7 +42,9 @@ import {
   DropdownMenuSub,
   DropdownMenuSubTrigger,
   DropdownMenuSubContent,
-  DropdownMenuPortal
+  DropdownMenuPortal,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
 } from "@/components/ui/dropdown-menu";
 import {
   AlertDialog,
@@ -63,7 +68,10 @@ export default function Home() {
   const router = useRouter();
   const [activeView, setActiveView] = useState<ActiveView>('board');
   const { isMobile } = useSidebar();
-  const { boards, activeBoardId, setActiveBoardId, getActiveBoard, deleteBoard } = useTasks();
+  const { 
+    boards, activeBoardId, setActiveBoardId, getActiveBoard, deleteBoard,
+    boardGroups, addBoardGroup, deleteBoardGroup, updateBoardGroupName, addBoardToGroup, removeBoardFromGroup, updateBoardGroupId
+  } = useTasks();
   const { toast } = useToast();
 
   const [isCreateBoardDialogOpen, setIsCreateBoardDialogOpen] = useState(false);
@@ -71,6 +79,10 @@ export default function Home() {
   const [boardToRename, setBoardToRename] = useState<Board | undefined>(undefined);
   const [isThemeCustomizerOpen, setIsThemeCustomizerOpen] = useState(false);
   const [boardToCustomize, setBoardToCustomize] = useState<Board | undefined>(undefined);
+  const [isCreateGroupDialogOpen, setIsCreateGroupDialogOpen] = useState(false);
+  const [isRenameGroupDialogOpen, setIsRenameGroupDialogOpen] = useState(false);
+  const [groupToRename, setGroupToRename] = useState<BoardGroup | undefined>(undefined);
+  const [targetGroupIdForNewBoard, setTargetGroupIdForNewBoard] = useState<string | null | undefined>(undefined);
 
 
   useEffect(() => {
@@ -115,7 +127,7 @@ export default function Home() {
   };
 
   const handleDeleteBoard = (boardId: string, boardName: string) => {
-    deleteBoard(boardId);
+    deleteBoard(boardId); // This will also handle removing from group in TaskContext
     toast({
         title: "Board Deleted",
         description: `Board "${boardName}" has been successfully deleted.`,
@@ -127,14 +139,43 @@ export default function Home() {
     setIsThemeCustomizerOpen(true);
   }
 
+  const handleRenameGroup = (group: BoardGroup) => {
+    setGroupToRename(group);
+    setIsRenameGroupDialogOpen(true);
+  };
+
+  const handleDeleteGroup = (groupId: string, groupName: string) => {
+    deleteBoardGroup(groupId);
+    toast({
+        title: "Board Group Deleted",
+        description: `Group "${groupName}" has been deleted. Its boards are now ungrouped.`,
+    });
+  };
+
+  const handleMoveBoardToGroup = (boardId: string, groupId: string | null) => {
+    if (groupId === "new_group") {
+        setIsCreateGroupDialogOpen(true); 
+        // After group creation, we'd need to add the board. This might need a callback or state to manage.
+        // For now, let's assume user creates group then moves board.
+        toast({ title: "Create Group", description: "Please create a new group first, then move the board."});
+    } else if (groupId === "remove_from_group") {
+        removeBoardFromGroup(boardId);
+    } else if (groupId) {
+        addBoardToGroup(boardId, groupId);
+    }
+  };
+
+  const openCreateBoardDialog = (groupId?: string | null) => {
+    setTargetGroupIdForNewBoard(groupId);
+    setIsCreateBoardDialogOpen(true);
+  };
+
+
   const getUserInitial = () => {
-    if (currentUser?.displayName) {
-      return currentUser.displayName.charAt(0).toUpperCase();
-    }
-    if (currentUser?.email) {
-      return currentUser.email.charAt(0).toUpperCase();
-    }
-    return "G"; // Guest or fallback
+    if (isGuest) return "G";
+    if (currentUser?.displayName) return currentUser.displayName.charAt(0).toUpperCase();
+    if (currentUser?.email) return currentUser.email.charAt(0).toUpperCase();
+    return "?";
   }
   
   const getProviderIcon = () => {
@@ -150,6 +191,7 @@ export default function Home() {
     return null;
   }
 
+  const ungroupedBoards = boards.filter(board => !board.groupId);
 
   return (
     <div className="flex h-screen bg-background text-foreground animate-fadeIn">
@@ -175,6 +217,87 @@ export default function Home() {
         </SidebarHeader>
         <SidebarContent className="flex-1 overflow-y-auto p-2">
           <SidebarMenu>
+            {/* Board Groups Section */}
+            <SidebarMenuItem>
+                <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                        <SidebarMenuButton
+                            tooltip="Board Groups"
+                            className="w-full hover:bg-sidebar-accent/80 dark:hover:bg-sidebar-accent/50"
+                            disabled={authLoading && !currentUser && !isGuest} 
+                        >
+                            <Folders /> 
+                            Board Groups
+                        </SidebarMenuButton>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent className="w-64 ml-2" side="right" align="start">
+                        <DropdownMenuLabel>Your Board Groups</DropdownMenuLabel>
+                        <DropdownMenuSeparator />
+                        {boardGroups.length === 0 && <DropdownMenuItem disabled>No groups yet.</DropdownMenuItem>}
+                        {boardGroups.map(group => (
+                           <AlertDialog key={group.id}> 
+                            <DropdownMenuSub>
+                                <DropdownMenuSubTrigger className="justify-between">
+                                    <span>{group.name} ({group.boardIds.length})</span>
+                                </DropdownMenuSubTrigger>
+                                <DropdownMenuPortal>
+                                    <DropdownMenuSubContent className="w-48">
+                                        <DropdownMenuLabel>Boards in {group.name}</DropdownMenuLabel>
+                                        {group.boardIds.length === 0 && <DropdownMenuItem disabled>No boards in this group.</DropdownMenuItem>}
+                                        {group.boardIds.map(boardId => {
+                                            const board = boards.find(b => b.id === boardId);
+                                            return board ? (
+                                                <DropdownMenuItem key={boardId} onClick={() => setActiveBoardId(boardId)} className={cn(boardId === activeBoardId && "bg-accent text-accent-foreground")}>
+                                                    {board.name}
+                                                </DropdownMenuItem>
+                                            ) : null;
+                                        })}
+                                        <DropdownMenuSeparator />
+                                        <DropdownMenuItem onClick={() => openCreateBoardDialog(group.id)}>
+                                            <PlusCircle className="mr-2 h-4 w-4" /> Add New Board to Group
+                                        </DropdownMenuItem>
+                                        <DropdownMenuSeparator />
+                                        <DropdownMenuItem onClick={() => handleRenameGroup(group)}>
+                                            <Edit3 className="mr-2 h-4 w-4" /> Rename Group
+                                        </DropdownMenuItem>
+                                        <AlertDialogTrigger asChild>
+                                            <DropdownMenuItem className="text-destructive focus:text-destructive focus:bg-destructive/10">
+                                                <Trash2 className="mr-2 h-4 w-4" /> Delete Group
+                                            </DropdownMenuItem>
+                                        </AlertDialogTrigger>
+                                    </DropdownMenuSubContent>
+                                </DropdownMenuPortal>
+                            </DropdownMenuSub>
+                             <AlertDialogContent>
+                                <AlertDialogHeader>
+                                    <AlertDialogTitle>Delete Group &quot;{group.name}&quot;?</AlertDialogTitle>
+                                    <AlertDialogDescription>
+                                    This will delete the group. Boards within this group will become ungrouped. This action cannot be undone.
+                                    </AlertDialogDescription>
+                                </AlertDialogHeader>
+                                <AlertDialogFooter>
+                                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                    <AlertDialogAction
+                                    onClick={() => handleDeleteGroup(group.id, group.name)}
+                                    className={buttonVariants({ variant: "destructive" })}
+                                    >
+                                    Delete Group
+                                    </AlertDialogAction>
+                                </AlertDialogFooter>
+                            </AlertDialogContent>
+                           </AlertDialog>
+                        ))}
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem onClick={() => setIsCreateGroupDialogOpen(true)}>
+                            <FolderPlus className="mr-2 h-4 w-4" /> Create New Group
+                        </DropdownMenuItem>
+                    </DropdownMenuContent>
+                </DropdownMenu>
+            </SidebarMenuItem>
+
+            <SidebarSeparator />
+
+            {/* Individual Boards Section (Ungrouped and All) */}
             <SidebarMenuItem>
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
@@ -187,9 +310,10 @@ export default function Home() {
                             My Boards
                         </SidebarMenuButton>
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent className="w-56 ml-2" side="right" align="start">
+                    <DropdownMenuContent className="w-64 ml-2" side="right" align="start">
                         <DropdownMenuLabel>Your Boards</DropdownMenuLabel>
                         <DropdownMenuSeparator />
+                        {boards.length === 0 && <DropdownMenuItem disabled>No boards yet.</DropdownMenuItem>}
                         {boards.map(board => (
                            <AlertDialog key={board.id}> 
                             <DropdownMenuSub>
@@ -197,46 +321,79 @@ export default function Home() {
                                     className={cn("justify-between", board.id === activeBoardId && "bg-accent text-accent-foreground")}
                                     onClick={() => setActiveBoardId(board.id)}
                                 >
-                                    <span>{board.name}</span>
+                                    <span>{board.name} {board.groupId && <span className="text-xs text-muted-foreground ml-1">({boardGroups.find(g=>g.id===board.groupId)?.name})</span>}</span>
                                 </DropdownMenuSubTrigger>
                                 <DropdownMenuPortal>
-                                    <DropdownMenuSubContent>
+                                    <DropdownMenuSubContent className="w-52">
                                         <DropdownMenuItem onClick={() => handleRenameBoard(board)}>
-                                            <Edit3 className="mr-2 h-4 w-4" /> Rename
+                                            <Edit3 className="mr-2 h-4 w-4" /> Rename Board
                                         </DropdownMenuItem>
                                         <DropdownMenuItem onClick={() => handleCustomizeTheme(board)}>
                                             <Palette className="mr-2 h-4 w-4" /> Customize Theme
                                         </DropdownMenuItem>
+                                        <DropdownMenuSub>
+                                            <DropdownMenuSubTrigger>
+                                                <FolderSymlink className="mr-2 h-4 w-4" /> Move to Group
+                                            </DropdownMenuSubTrigger>
+                                            <DropdownMenuPortal>
+                                                <DropdownMenuSubContent>
+                                                    <DropdownMenuRadioGroup 
+                                                        value={board.groupId || "ungrouped"} 
+                                                        onValueChange={(value) => handleMoveBoardToGroup(board.id, value === "ungrouped" ? "remove_from_group" : value)}
+                                                    >
+                                                        {board.groupId && (
+                                                          <DropdownMenuRadioItem value="remove_from_group">
+                                                            Remove from current group
+                                                          </DropdownMenuRadioItem>
+                                                        )}
+                                                        {!board.groupId && (
+                                                            <DropdownMenuItem disabled>Not in a group</DropdownMenuItem>
+                                                        )}
+                                                        <DropdownMenuSeparator />
+                                                        {boardGroups.length > 0 && <DropdownMenuLabel>Existing Groups</DropdownMenuLabel>}
+                                                        {boardGroups.map(group => (
+                                                            <DropdownMenuRadioItem key={group.id} value={group.id} disabled={board.groupId === group.id}>
+                                                                {group.name}
+                                                            </DropdownMenuRadioItem>
+                                                        ))}
+                                                         <DropdownMenuSeparator />
+                                                        <DropdownMenuItem onClick={() => setIsCreateGroupDialogOpen(true)}>
+                                                           <FolderPlus className="mr-2 h-4 w-4" /> Create New Group...
+                                                        </DropdownMenuItem>
+                                                    </DropdownMenuRadioGroup>
+                                                </DropdownMenuSubContent>
+                                            </DropdownMenuPortal>
+                                        </DropdownMenuSub>
                                         <DropdownMenuSeparator />
                                         <AlertDialogTrigger asChild>
                                             <DropdownMenuItem className="text-destructive focus:text-destructive focus:bg-destructive/10">
                                                 <Trash2 className="mr-2 h-4 w-4" /> Delete Board
                                             </DropdownMenuItem>
                                         </AlertDialogTrigger>
-                                        <AlertDialogContent>
-                                            <AlertDialogHeader>
-                                                <AlertDialogTitle>Delete Board &quot;{board.name}&quot;?</AlertDialogTitle>
-                                                <AlertDialogDescription>
-                                                This action cannot be undone. This will permanently delete the board and all its tasks.
-                                                </AlertDialogDescription>
-                                            </AlertDialogHeader>
-                                            <AlertDialogFooter>
-                                                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                                <AlertDialogAction
-                                                onClick={() => handleDeleteBoard(board.id, board.name)}
-                                                className={buttonVariants({ variant: "destructive" })}
-                                                >
-                                                Delete
-                                                </AlertDialogAction>
-                                            </AlertDialogFooter>
-                                        </AlertDialogContent>
                                     </DropdownMenuSubContent>
                                 </DropdownMenuPortal>
                             </DropdownMenuSub>
+                             <AlertDialogContent>
+                                <AlertDialogHeader>
+                                    <AlertDialogTitle>Delete Board &quot;{board.name}&quot;?</AlertDialogTitle>
+                                    <AlertDialogDescription>
+                                    This action cannot be undone. This will permanently delete the board and all its tasks.
+                                    </AlertDialogDescription>
+                                </AlertDialogHeader>
+                                <AlertDialogFooter>
+                                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                    <AlertDialogAction
+                                    onClick={() => handleDeleteBoard(board.id, board.name)}
+                                    className={buttonVariants({ variant: "destructive" })}
+                                    >
+                                    Delete
+                                    </AlertDialogAction>
+                                </AlertDialogFooter>
+                            </AlertDialogContent>
                            </AlertDialog>
                         ))}
                         <DropdownMenuSeparator />
-                        <DropdownMenuItem onClick={() => setIsCreateBoardDialogOpen(true)}>
+                        <DropdownMenuItem onClick={() => openCreateBoardDialog()}>
                             <PlusCircle className="mr-2 h-4 w-4" /> Create New Board
                         </DropdownMenuItem>
                     </DropdownMenuContent>
@@ -370,7 +527,7 @@ export default function Home() {
                 <FolderKanban className="w-24 h-24 text-muted-foreground mb-4" />
                 <h2 className="text-2xl font-semibold mb-2">No Board Selected</h2>
                 <p className="text-muted-foreground mb-4">Please create or select a board from the sidebar to get started.</p>
-                <Button onClick={() => setIsCreateBoardDialogOpen(true)}>
+                <Button onClick={() => openCreateBoardDialog()}>
                     <PlusCircle className="mr-2 h-4 w-4" /> Create Your First Board
                 </Button>
             </div>
@@ -381,9 +538,15 @@ export default function Home() {
           {activeView === 'settings' && <SettingsView />}
         </main>
       </SidebarInset>
-      <CreateBoardDialog open={isCreateBoardDialogOpen} onOpenChange={setIsCreateBoardDialogOpen} />
+      <CreateBoardDialog 
+        open={isCreateBoardDialogOpen} 
+        onOpenChange={setIsCreateBoardDialogOpen} 
+        targetGroupId={targetGroupIdForNewBoard}
+      />
       <RenameBoardDialog board={boardToRename} open={isRenameBoardDialogOpen} onOpenChange={setIsRenameBoardDialogOpen} />
       <BoardThemeCustomizer board={boardToCustomize} open={isThemeCustomizerOpen} onOpenChange={setIsThemeCustomizerOpen} />
+      <CreateBoardGroupDialog open={isCreateGroupDialogOpen} onOpenChange={setIsCreateGroupDialogOpen} />
+      <RenameBoardGroupDialog group={groupToRename} open={isRenameGroupDialogOpen} onOpenChange={setIsRenameGroupDialogOpen} />
     </div>
   );
 }

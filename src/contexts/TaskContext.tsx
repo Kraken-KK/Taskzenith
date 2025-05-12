@@ -1,7 +1,7 @@
 // src/contexts/TaskContext.tsx
 'use client';
 
-import type { Task, Column, ChecklistItem, Board, BoardTheme } from '@/types';
+import type { Task, Column, ChecklistItem, Board, BoardTheme, BoardGroup } from '@/types';
 import type { ReactNode } from 'react';
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { useToast } from "@/hooks/use-toast";
@@ -61,6 +61,7 @@ const initialDefaultBoardForGuest = (): Board => ({
     columns: assignTaskStatusToColumns(getDefaultColumnsForGuest()),
     createdAt: formatISO(new Date()),
     theme: {},
+    groupId: null,
 });
 
 
@@ -69,11 +70,19 @@ interface TaskContextType {
   activeBoardId: string | null;
   setActiveBoardId: (boardId: string | null) => void;
   getActiveBoard: () => Board | undefined;
-  addBoard: (name: string) => Board | undefined;
+  addBoard: (name: string, groupId?: string | null) => Board | undefined;
   deleteBoard: (boardId: string) => void;
   updateBoardName: (boardId: string, newName: string) => void;
   updateBoardTheme: (boardId: string, theme: Partial<BoardTheme>) => void;
+  updateBoardGroupId: (boardId: string, groupId: string | null) => void;
   
+  boardGroups: BoardGroup[];
+  addBoardGroup: (name: string) => BoardGroup | undefined;
+  deleteBoardGroup: (groupId: string) => void;
+  updateBoardGroupName: (groupId: string, newName: string) => void;
+  addBoardToGroup: (boardId: string, groupId: string) => void;
+  removeBoardFromGroup: (boardId: string) => void; // Simplified: just removes from any group
+
   addTask: (taskData: Omit<Task, 'id' | 'status' | 'createdAt' | 'dependencies' | 'checklist' | 'tags'> & Partial<Pick<Task, 'dependencies' | 'checklist' | 'tags' | 'description' | 'deadline'>>, targetColumnId?: Column['id']) => void;
   moveTask: (taskId: string, sourceColumnId: Column['id'], targetColumnId: Column['id'], isBetaModeActive: boolean) => { task: Task | null, automated: boolean };
   deleteTask: (taskId: string, columnId: Column['id']) => void;
@@ -98,6 +107,7 @@ export function TaskProvider({ children }: { children: ReactNode }) {
   const { currentUser, isGuest, loading: authLoading } = useAuth(); 
   const [boards, setBoards] = useState<Board[]>([]);
   const [activeBoardId, setActiveBoardIdState] = useState<string | null>(null);
+  const [boardGroups, setBoardGroups] = useState<BoardGroup[]>([]);
   const { toast } = useToast();
   const [isLoadingData, setIsLoadingData] = useState(true);
 
@@ -133,7 +143,7 @@ export function TaskProvider({ children }: { children: ReactNode }) {
                         ...task,
                         id: task.id || generateId('task-fb'),
                         content: task.content || 'Untitled Task',
-                        status: col.id || '', // Ensure status is set, will be overwritten by assignTaskStatusToColumns
+                        status: col.id || '', 
                         priority: task.priority || 'medium',
                         createdAt: task.createdAt || formatISO(new Date()),
                         checklist: task.checklist || [],
@@ -143,10 +153,23 @@ export function TaskProvider({ children }: { children: ReactNode }) {
                 }))) : [],
                 createdAt: board.createdAt || formatISO(new Date()),
                 theme: board.theme || {},
+                groupId: board.groupId === undefined ? null : board.groupId, // Sanitize groupId
             }));
 
             setBoards(sanitizedBoards);
             console.log("TaskContext: Boards sanitized and set from Firestore:", sanitizedBoards.length, "boards");
+
+            const firestoreBoardGroups = (userData.boardGroups || []) as BoardGroup[];
+            const sanitizedBoardGroups = firestoreBoardGroups.map(group => ({
+                ...group,
+                id: group.id || generateId('group-fb'),
+                name: group.name || 'Untitled Group',
+                boardIds: Array.isArray(group.boardIds) ? group.boardIds : [],
+                createdAt: group.createdAt || formatISO(new Date()),
+            }));
+            setBoardGroups(sanitizedBoardGroups);
+            console.log("TaskContext: Board groups sanitized and set from Firestore:", sanitizedBoardGroups.length, "groups");
+
 
             const firestoreActiveBoardId = userData.activeBoardId as string | null;
             if (firestoreActiveBoardId && sanitizedBoards.find(b => b.id === firestoreActiveBoardId)) {
@@ -166,18 +189,22 @@ export function TaskProvider({ children }: { children: ReactNode }) {
           } else {
             console.warn("TaskContext: User document not found in Firestore for logged-in user. This should be handled by AuthContext creating the user doc with defaults.");
             setBoards([]); 
+            setBoardGroups([]);
             setActiveBoardIdState(null);
           }
         } catch (error) {
           console.error("TaskContext: Error loading user data from Firestore:", error);
           toast({ title: "Data Load Error", description: "Could not load your board data.", variant: "destructive" });
           setBoards([]);
+          setBoardGroups([]);
           setActiveBoardIdState(null);
         }
       } else if (isGuest) { 
         console.log("TaskContext: Guest user. Loading data from localStorage.");
         const guestBoardsKey = 'kanbanBoards-guestSession';
         const guestActiveIdKey = 'activeKanbanBoardId-guestSession';
+        const guestBoardGroupsKey = 'boardGroups-guestSession';
+
         const savedBoards = localStorage.getItem(guestBoardsKey);
         if (savedBoards) {
           try {
@@ -204,6 +231,7 @@ export function TaskProvider({ children }: { children: ReactNode }) {
                 }))) : [],
                 createdAt: board.createdAt || formatISO(new Date()),
                 theme: board.theme || {},
+                groupId: board.groupId === undefined ? null : board.groupId,
             }));
             setBoards(sanitizedBoards);
             console.log("TaskContext: Boards set from localStorage for guest:", sanitizedBoards.length, "boards");
@@ -231,9 +259,29 @@ export function TaskProvider({ children }: { children: ReactNode }) {
           setActiveBoardIdState(defaultGuestBoard.id);
           console.log("TaskContext: No boards in localStorage for guest, initialized with default guest board.");
         }
+        const savedBoardGroups = localStorage.getItem(guestBoardGroupsKey);
+        if(savedBoardGroups) {
+            try {
+                const parsedGroups = JSON.parse(savedBoardGroups) as BoardGroup[];
+                setBoardGroups(parsedGroups.map(g => ({
+                    ...g,
+                    id: g.id || generateId('group-guest-parsed'),
+                    name: g.name || 'Untitled Guest Group',
+                    boardIds: Array.isArray(g.boardIds) ? g.boardIds : [],
+                    createdAt: g.createdAt || formatISO(new Date())
+                })));
+            } catch (e) {
+                 console.error("TaskContext: Failed to parse guest board groups from localStorage", e);
+                 setBoardGroups([]);
+            }
+        } else {
+            setBoardGroups([]);
+        }
+
       } else { 
-        console.log("TaskContext: No user and not guest. Clearing boards.");
+        console.log("TaskContext: No user and not guest. Clearing boards and groups.");
         setBoards([]);
+        setBoardGroups([]);
         setActiveBoardIdState(null);
       }
       setIsLoadingData(false);
@@ -257,6 +305,7 @@ export function TaskProvider({ children }: { children: ReactNode }) {
         try {
            const boardsToSave = boards.map(board => ({
             ...board,
+            groupId: board.groupId === undefined ? null : board.groupId,
             columns: board.columns.map(column => ({
               ...column,
               tasks: column.tasks.map(task => ({
@@ -268,7 +317,7 @@ export function TaskProvider({ children }: { children: ReactNode }) {
               }))
             }))
           }));
-          await updateDoc(userDocRef, { boards: boardsToSave, activeBoardId });
+          await updateDoc(userDocRef, { boards: boardsToSave, activeBoardId, boardGroups });
           console.log("TaskContext Save: Data saved to Firestore for user", currentUser.id);
         } catch (error) {
           console.error("TaskContext Save: Error saving user data to Firestore:", error);
@@ -277,7 +326,9 @@ export function TaskProvider({ children }: { children: ReactNode }) {
         console.log("TaskContext Save: Guest user. Saving data to localStorage.");
         const guestBoardsKey = 'kanbanBoards-guestSession';
         const guestActiveIdKey = 'activeKanbanBoardId-guestSession';
+        const guestBoardGroupsKey = 'boardGroups-guestSession';
         localStorage.setItem(guestBoardsKey, JSON.stringify(boards));
+        localStorage.setItem(guestBoardGroupsKey, JSON.stringify(boardGroups));
         if (activeBoardId) {
           localStorage.setItem(guestActiveIdKey, activeBoardId);
         } else {
@@ -287,7 +338,7 @@ export function TaskProvider({ children }: { children: ReactNode }) {
       }
     };
     saveData();
-  }, [boards, activeBoardId, currentUser, isGuest, isLoadingData, authLoading, toast]);
+  }, [boards, activeBoardId, boardGroups, currentUser, isGuest, isLoadingData, authLoading, toast]);
   
   const setActiveBoardId = useCallback((boardId: string | null) => {
     console.log("TaskContext: Setting active board ID to:", boardId);
@@ -298,7 +349,7 @@ export function TaskProvider({ children }: { children: ReactNode }) {
     return boards.find(b => b.id === activeBoardId);
   }, [boards, activeBoardId]);
 
-  const addBoard = (name: string): Board | undefined => {
+  const addBoard = (name: string, groupId: string | null = null): Board | undefined => {
     if (!currentUser && !isGuest) {
         toast({ title: "Action Denied", description: "You must be logged in or in guest mode to add a board.", variant: "destructive"});
         return undefined;
@@ -314,20 +365,35 @@ export function TaskProvider({ children }: { children: ReactNode }) {
       ]),
       createdAt: formatISO(new Date()),
       theme: {},
+      groupId: groupId,
     };
     setBoards(prevBoards => [...prevBoards, newBoard]);
+    if (groupId) {
+        setBoardGroups(prevGroups => prevGroups.map(g => 
+            g.id === groupId ? { ...g, boardIds: [...g.boardIds, newBoardId] } : g
+        ));
+    }
     setActiveBoardId(newBoard.id); 
     toast({ title: "Board Created", description: `Board "${name}" has been created.`});
-    console.log("TaskContext: Board added:", newBoard.id, newName);
+    console.log("TaskContext: Board added:", newBoard.id, name, "to group:", groupId);
     return newBoard;
   };
 
   const deleteBoard = (boardId: string) => {
     if (!currentUser && !isGuest) return;
     setBoards(prevBoards => {
+      const boardToDelete = prevBoards.find(b => b.id === boardId);
       const remainingBoards = prevBoards.filter(b => b.id !== boardId);
       if (activeBoardId === boardId) { 
         setActiveBoardId(remainingBoards.length > 0 ? remainingBoards[0].id : null);
+      }
+      // Remove board from any group
+      if (boardToDelete?.groupId) {
+          setBoardGroups(prevGroups => prevGroups.map(g => 
+              g.id === boardToDelete.groupId 
+                  ? { ...g, boardIds: g.boardIds.filter(id => id !== boardId) } 
+                  : g
+          ));
       }
       return remainingBoards;
     });
@@ -354,6 +420,92 @@ export function TaskProvider({ children }: { children: ReactNode }) {
      toast({ title: "Board Theme Updated", description: "Board appearance has been customized."});
      console.log("TaskContext: Board theme updated for board:", boardId);
   };
+
+  const updateBoardGroupId = (boardId: string, newGroupId: string | null) => {
+    setBoards(prevBoards => prevBoards.map(board => 
+      board.id === boardId ? { ...board, groupId: newGroupId } : board
+    ));
+  };
+
+  const addBoardGroup = (name: string): BoardGroup | undefined => {
+    if (!currentUser && !isGuest) {
+        toast({ title: "Action Denied", description: "You must be logged in or in guest mode to add a board group.", variant: "destructive"});
+        return undefined;
+    }
+    const newGroup: BoardGroup = {
+        id: generateId(isGuest ? 'group-guest' : 'group-user'),
+        name,
+        boardIds: [],
+        createdAt: formatISO(new Date()),
+    };
+    setBoardGroups(prev => [...prev, newGroup]);
+    toast({ title: "Board Group Created", description: `Group "${name}" created.`});
+    console.log("TaskContext: Board group added:", newGroup.id, name);
+    return newGroup;
+  };
+
+  const deleteBoardGroup = (groupId: string) => {
+    if (!currentUser && !isGuest) return;
+    setBoardGroups(prev => prev.filter(g => g.id !== groupId));
+    // Ungroup boards that were in this group
+    setBoards(prevBoards => prevBoards.map(b => 
+        b.groupId === groupId ? { ...b, groupId: null } : b
+    ));
+    toast({ title: "Board Group Deleted", description: "Group deleted. Boards are now ungrouped."});
+    console.log("TaskContext: Board group deleted:", groupId);
+  };
+
+  const updateBoardGroupName = (groupId: string, newName: string) => {
+    if (!currentUser && !isGuest) return;
+    setBoardGroups(prev => prev.map(g => g.id === groupId ? { ...g, name: newName } : g));
+    toast({ title: "Board Group Renamed", description: "Group name updated."});
+    console.log("TaskContext: Board group renamed:", groupId, "to", newName);
+  };
+
+  const addBoardToGroup = (boardId: string, targetGroupId: string) => {
+    if (!currentUser && !isGuest) return;
+    // First, remove board from any existing group it might be in (both from board object and group's boardIds)
+    setBoards(prevBoards => prevBoards.map(b => {
+        if (b.id === boardId) {
+            if (b.groupId && b.groupId !== targetGroupId) { // If it was in a different group
+                setBoardGroups(prevGroups => prevGroups.map(g => 
+                    g.id === b.groupId ? { ...g, boardIds: g.boardIds.filter(id => id !== boardId) } : g
+                ));
+            }
+            return { ...b, groupId: targetGroupId };
+        }
+        return b;
+    }));
+
+    // Then, add board to the target group's boardIds list
+    setBoardGroups(prevGroups => prevGroups.map(g => 
+        g.id === targetGroupId 
+            ? { ...g, boardIds: [...new Set([...g.boardIds, boardId])] } // Use Set to ensure no duplicates
+            : g
+    ));
+    const boardName = boards.find(b => b.id === boardId)?.name || "Board";
+    const groupName = boardGroups.find(g => g.id === targetGroupId)?.name || "Group";
+    toast({ title: "Board Moved to Group", description: `"${boardName}" added to group "${groupName}".` });
+    console.log("TaskContext: Board", boardId, "added to group", targetGroupId);
+  };
+
+  const removeBoardFromGroup = (boardId: string) => {
+    if (!currentUser && !isGuest) return;
+    const board = boards.find(b => b.id === boardId);
+    if (!board || !board.groupId) return; // Not in a group or board not found
+    
+    const sourceGroupId = board.groupId;
+    
+    setBoards(prevBoards => prevBoards.map(b => 
+        b.id === boardId ? { ...b, groupId: null } : b
+    ));
+    setBoardGroups(prevGroups => prevGroups.map(g => 
+        g.id === sourceGroupId ? { ...g, boardIds: g.boardIds.filter(id => id !== boardId) } : g
+    ));
+    toast({ title: "Board Ungrouped", description: `"${board.name}" removed from its group.`});
+    console.log("TaskContext: Board", boardId, "removed from group", sourceGroupId);
+  };
+
 
   const executeOnActiveBoard = <T,>(operation: (board: Board) => { updatedBoard?: Board, result?: T }): T | undefined => {
     if ((!currentUser && !isGuest) || !activeBoardId) {
@@ -613,7 +765,9 @@ export function TaskProvider({ children }: { children: ReactNode }) {
   if (isLoadingData || authLoading) {
      return (
       <TaskContext.Provider value={{ 
-        boards: [], activeBoardId: null, setActiveBoardId: () => {}, getActiveBoard: () => undefined, addBoard: () => undefined, deleteBoard: () => {}, updateBoardName: () => {}, updateBoardTheme: () => {},
+        boards: [], activeBoardId: null, setActiveBoardId: () => {}, getActiveBoard: () => undefined, 
+        addBoard: () => undefined, deleteBoard: () => {}, updateBoardName: () => {}, updateBoardTheme: () => {}, updateBoardGroupId: () => {},
+        boardGroups: [], addBoardGroup: () => undefined, deleteBoardGroup: () => {}, updateBoardGroupName: () => {}, addBoardToGroup: () => {}, removeBoardFromGroup: () => {},
         addTask: () => {}, moveTask: () => ({task: null, automated: false }), deleteTask: () => {}, updateTask: () => {}, getTaskById: () => undefined, getAllTasksOfActiveBoard: () => [],
         addColumn: () => {}, updateColumnTitle: () => {}, deleteColumn: () => {}, updateColumnWipLimit: () => {},
         addChecklistItem: () => {}, toggleChecklistItem: () => {}, deleteChecklistItem: () => {}, updateChecklistItemText: () => {}
@@ -631,7 +785,8 @@ export function TaskProvider({ children }: { children: ReactNode }) {
 
   return (
     <TaskContext.Provider value={{ 
-        boards, activeBoardId, setActiveBoardId, getActiveBoard, addBoard, deleteBoard, updateBoardName, updateBoardTheme,
+        boards, activeBoardId, setActiveBoardId, getActiveBoard, addBoard, deleteBoard, updateBoardName, updateBoardTheme, updateBoardGroupId,
+        boardGroups, addBoardGroup, deleteBoardGroup, updateBoardGroupName, addBoardToGroup, removeBoardFromGroup,
         addTask, moveTask, deleteTask, updateTask, getTaskById, getAllTasksOfActiveBoard,
         addColumn, updateColumnTitle, deleteColumn, updateColumnWipLimit,
         addChecklistItem, toggleChecklistItem, deleteChecklistItem, updateChecklistItemText
@@ -648,4 +803,3 @@ export function useTasks() {
   }
   return context;
 }
-

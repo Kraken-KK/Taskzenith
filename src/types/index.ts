@@ -44,4 +44,13 @@ export interface Board {
   columns: Column[];
   theme?: BoardTheme; // Optional theme customization
   createdAt: string; // ISO string format for board creation time
+  groupId?: string | null; // Optional: ID of the group this board belongs to
+}
+
+// Define the structure of a Board Group
+export interface BoardGroup {
+  id: string;
+  name: string;
+  boardIds: string[]; // Array of board IDs belonging to this group
+  createdAt: string; // ISO string format for group creation time
 }
