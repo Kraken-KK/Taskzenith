@@ -128,16 +128,46 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     provider: 'supabase',
   });
 
+  /**
+   * Initializes or updates user data in Firestore.
+   * This function is crucial for ensuring user data persistence.
+   * 
+   * IF DATA IS NOT SAVING TO FIRESTORE or COLLECTIONS ARE NOT BEING CREATED:
+   * 1. CHECK YOUR FIRESTORE SECURITY RULES: This is the MOST COMMON cause.
+   *    Ensure that authenticated users have write permission to the `users/{userId}` path.
+   *    A basic rule for development might be:
+   *    ```
+   *    rules_version = '2';
+   *    service cloud.firestore {
+   *      match /databases/{database}/documents {
+   *        match /users/{userId} {
+   *          allow read, write: if request.auth != null && request.auth.uid == userId;
+   *        }
+   *      }
+   *    }
+   *    ```
+   * 2. VERIFY FIREBASE CONFIGURATION: Ensure your `.env.local` file has the correct
+   *    Firebase project details (apiKey, projectId, etc.).
+   * 3. CHECK CONSOLE LOGS: Look for any Firestore-related errors in the browser console.
+   *    The detailed logs added below should help pinpoint where the process might be failing.
+   */
   const initializeFirestoreUserData = async (appUser: AppUser) => {
+    if (!appUser || !appUser.id) {
+      console.error("Firestore Init: `appUser` or `appUser.id` is undefined. Cannot initialize user data.", appUser);
+      toast({ title: 'Critical Error', description: 'User identification failed. Cannot save data.', variant: 'destructive' });
+      return;
+    }
+
     const userDocRef = doc(db, 'users', appUser.id);
-    console.log(`Initializing Firestore data for user: ${appUser.id} (Email: ${appUser.email}, Provider: ${appUser.provider})`);
+    console.log(`Firestore Init: Starting for user ID: ${appUser.id} (Email: ${appUser.email}, Provider: ${appUser.provider})`);
+
     try {
       const userDocSnap = await getDoc(userDocRef);
       const defaultBoard = getDefaultBoardForNewUser();
 
       if (!userDocSnap.exists()) {
-        console.log(`User document for ${appUser.id} does not exist. Creating with defaults.`);
-        await setDoc(userDocRef, {
+        console.log(`Firestore Init: User document for ${appUser.id} does NOT exist. Attempting to CREATE new document.`);
+        const newUserDocumentData = {
           email: appUser.email,
           displayName: appUser.displayName,
           photoURL: appUser.photoURL || null,
@@ -148,33 +178,47 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           activeBoardId: defaultBoard.id,
           settings: defaultUserSettings,
           aiChatHistory: defaultAiChatHistory,
-        });
-        console.log(`Firestore document CREATED for new user: ${appUser.id}`);
-        toast({ title: 'Welcome!', description: 'Your account has been set up.' });
+        };
+        console.log(`Firestore Init: Data for new user ${appUser.id}:`, JSON.stringify(newUserDocumentData, null, 2));
+        await setDoc(userDocRef, newUserDocumentData);
+        console.log(`Firestore Init: SUCCESS - Document CREATED for new user: ${appUser.id}`);
+        toast({ title: 'Welcome!', description: 'Your account has been set up and data initialized.' });
       } else {
-        console.log(`User document for ${appUser.id} exists. Checking/Updating fields.`);
+        console.log(`Firestore Init: User document for ${appUser.id} EXISTS. Attempting to UPDATE existing document.`);
         const userData = userDocSnap.data();
         const updates: Record<string, any> = { lastLogin: serverTimestamp() as Timestamp };
         let needsUpdate = false;
 
-        if (!userData.boards || userData.boards.length === 0) {
+        // Ensure essential structures exist
+        if (!userData.boards || !Array.isArray(userData.boards) || userData.boards.length === 0) {
           updates.boards = [defaultBoard];
-          updates.activeBoardId = defaultBoard.id; // Ensure activeBoardId is set if boards are new
+          updates.activeBoardId = defaultBoard.id;
           needsUpdate = true;
-          console.log(`User ${appUser.id} missing boards or has empty boards array. Adding default board.`);
+          console.log(`Firestore Init: User ${appUser.id} - boards missing or empty. Adding default board.`);
+        } else if (!userData.activeBoardId && updates.boards && updates.boards.length > 0) {
+          // If boards were just added, ensure activeBoardId is also set
+          updates.activeBoardId = updates.boards[0].id;
+          needsUpdate = true; // Technically covered by above, but explicit
+        } else if (userData.activeBoardId && !userData.boards.find((b: Board) => b.id === userData.activeBoardId) && userData.boards.length > 0) {
+          // Active board ID is invalid, set to first available board
+          updates.activeBoardId = userData.boards[0].id;
+          needsUpdate = true;
+          console.log(`Firestore Init: User ${appUser.id} - invalid activeBoardId. Resetting to first board.`);
         }
+
+
         if (!userData.settings) {
           updates.settings = defaultUserSettings;
           needsUpdate = true;
-          console.log(`User ${appUser.id} missing settings. Adding default settings.`);
+          console.log(`Firestore Init: User ${appUser.id} - settings missing. Adding default settings.`);
         }
         if (!userData.aiChatHistory) {
           updates.aiChatHistory = defaultAiChatHistory;
           needsUpdate = true;
-          console.log(`User ${appUser.id} missing AI chat history. Adding default history.`);
+          console.log(`Firestore Init: User ${appUser.id} - AI chat history missing. Adding default history.`);
         }
         
-        // Update essential user info if changed from auth provider
+        // Update user profile info if changed
         if (appUser.email && userData.email !== appUser.email) {
             updates.email = appUser.email;
             needsUpdate = true;
@@ -183,7 +227,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             updates.displayName = appUser.displayName;
             needsUpdate = true;
         }
-        if (appUser.photoURL !== undefined && userData.photoURL !== appUser.photoURL) { // Check undefined to allow setting null
+        if (appUser.photoURL !== undefined && userData.photoURL !== appUser.photoURL) {
             updates.photoURL = appUser.photoURL || null;
             needsUpdate = true;
         }
@@ -193,18 +237,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
 
         if (needsUpdate) {
-          console.log(`Updating existing user document for ${appUser.id} with:`, Object.keys(updates));
+          console.log(`Firestore Init: Updating existing document for ${appUser.id} with changes:`, Object.keys(updates));
+          console.log(`Firestore Init: Update data for user ${appUser.id}:`, JSON.stringify(updates, null, 2));
           await updateDoc(userDocRef, updates);
-          console.log(`Firestore document UPDATED for user: ${appUser.id}`);
+          console.log(`Firestore Init: SUCCESS - Document UPDATED for user: ${appUser.id}`);
         } else {
-          // Even if no other updates, always update lastLogin
-          console.log(`No major updates needed for ${appUser.id}. Updating lastLogin.`);
+          console.log(`Firestore Init: No major field updates needed for ${appUser.id}. Updating lastLogin only.`);
           await updateDoc(userDocRef, { lastLogin: serverTimestamp() as Timestamp });
+          console.log(`Firestore Init: SUCCESS - lastLogin UPDATED for user: ${appUser.id}`);
         }
       }
     } catch (error) {
-      console.error(`Error initializing/updating Firestore user data for ${appUser.id}:`, error);
-      toast({ title: 'Data Sync Error', description: `Could not initialize/update user data. Details: ${error instanceof Error ? error.message : String(error)}`, variant: 'destructive', duration: 10000 });
+      console.error(`Firestore Init: CRITICAL ERROR during Firestore operation for user ${appUser.id}:`, error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      toast({ 
+        title: 'Data Sync Error', 
+        description: `Could not save user data: ${errorMessage}. Please check console and Firestore rules.`, 
+        variant: 'destructive', 
+        duration: 15000 
+      });
     }
   };
 
@@ -517,3 +568,4 @@ export function useAuth() {
   }
   return context;
 }
+
