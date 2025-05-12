@@ -14,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Plus, Edit2, Trash2, Check, X, AlertTriangle, ListChecks, Filter, ArrowUpDown, Link2, MoreHorizontal, PlusCircle, CalendarDays, Tags, UserCircle, Palette, FolderKanban } from 'lucide-react';
 import Confetti from 'react-confetti';
 import { useToast } from "@/hooks/use-toast";
-import type { Task, Column as ColumnType, ChecklistItem } from '@/types';
+import type { Task, Column as ColumnType, ChecklistItem, Board } from '@/types';
 import { AddTaskDialog } from '@/components/add-task-dialog';
 import { useTasks } from '@/contexts/TaskContext';
 import { useSettings } from '@/contexts/SettingsContext';
@@ -44,7 +44,7 @@ import {
   DropdownMenuSubContent,
   DropdownMenuPortal
 } from "@/components/ui/dropdown-menu";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip";
 import { BoardThemeCustomizer } from '@/components/board-theme-customizer';
 
 
@@ -130,7 +130,6 @@ function TaskCard({
       onDragEnd={onDragEnd}
       className={cn(
         "mb-3 p-3 shadow-md hover:shadow-lg transition-shadow duration-200 ease-in-out interactive-card-hover relative bg-[var(--board-card-color,hsl(var(--card)))] text-[var(--board-card-foreground-color,hsl(var(--card-foreground)))]",
-        // dragOverColumnId === columnId && "border-[var(--board-primary-color,hsl(var(--primary)))] border-2" // This is handled by ring on column
       )}
     >
       <CardContent className="p-0 space-y-2">
@@ -150,26 +149,46 @@ function TaskCard({
             </p>
           )}
           {isBetaModeEnabled && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-6 w-6">
-                  <MoreHorizontal className="h-4 w-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={handleEditToggle}>
-                  <Edit2 className="mr-2 h-4 w-4" />
-                  {isEditing ? 'Save Title' : 'Edit Title'}
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <AlertDialogTrigger asChild>
-                   <DropdownMenuItem className="text-destructive focus:text-destructive focus:bg-destructive/10">
-                    <Trash2 className="mr-2 h-4 w-4" />
-                    Delete Task
+            <AlertDialog> {/* Added AlertDialog root for task deletion */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon" className="h-6 w-6">
+                    <MoreHorizontal className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={handleEditToggle}>
+                    <Edit2 className="mr-2 h-4 w-4" />
+                    {isEditing ? 'Save Title' : 'Edit Title'}
                   </DropdownMenuItem>
-                </AlertDialogTrigger>
-              </DropdownMenuContent>
-            </DropdownMenu>
+                  <DropdownMenuSeparator />
+                  <AlertDialogTrigger asChild>
+                    <DropdownMenuItem className="text-destructive focus:text-destructive focus:bg-destructive/10">
+                      <Trash2 className="mr-2 h-4 w-4" />
+                      Delete Task
+                    </DropdownMenuItem>
+                  </AlertDialogTrigger>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This action cannot be undone. This will permanently delete the task
+                    &quot;{task.content}&quot;.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={() => onDeleteTask(task.id, columnId)}
+                    className={buttonVariants({ variant: "destructive" })}
+                  >
+                    Delete
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           )}
         </div>
 
@@ -182,17 +201,19 @@ function TaskCard({
               {task.dependencies.map(depId => {
                 const depTask = getTaskById(depId);
                 return (
-                  <Tooltip key={depId}>
-                    <TooltipTrigger asChild>
-                      <Badge variant="outline" className="text-xs border-dashed border-[var(--board-primary-color,hsl(var(--primary)))]/50 text-[var(--board-primary-color,hsl(var(--primary)))]/80 py-0.5 px-1.5">
-                        <Link2 className="h-3 w-3 mr-1"/>
-                        {depTask ? depTask.content.substring(0,15) + (depTask.content.length > 15 ? '...' : '') : depId.substring(0,5)}
-                      </Badge>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>{depTask ? depTask.content : `Task ID: ${depId}`}</p>
-                    </TooltipContent>
-                  </Tooltip>
+                  <TooltipProvider key={depId}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Badge variant="outline" className="text-xs border-dashed border-[var(--board-primary-color,hsl(var(--primary)))]/50 text-[var(--board-primary-color,hsl(var(--primary)))]/80 py-0.5 px-1.5">
+                          <Link2 className="h-3 w-3 mr-1"/>
+                          {depTask ? depTask.content.substring(0,15) + (depTask.content.length > 15 ? '...' : '') : depId.substring(0,5)}
+                        </Badge>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <p>{depTask ? depTask.content : `Task ID: ${depId}`}</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
                 );
               })}
             </div>
@@ -281,24 +302,6 @@ function TaskCard({
           </p>
         )}
       </CardContent>
-       <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>Are you sure?</AlertDialogTitle>
-          <AlertDialogDescription>
-            This action cannot be undone. This will permanently delete the task
-            &quot;{task.content}&quot;.
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <AlertDialogAction
-            onClick={() => onDeleteTask(task.id, columnId)}
-            className={buttonVariants({ variant: "destructive" })}
-          >
-            Delete
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
     </Card>
   );
 }
@@ -335,8 +338,6 @@ export function KanbanBoard() {
     if (theme?.primaryColor) styles['--board-primary-color' as any] = theme.primaryColor;
     if (theme?.columnHeaderColor) styles['--board-column-header-color' as any] = theme.columnHeaderColor;
     if (theme?.cardColor) styles['--board-card-color' as any] = theme.cardColor;
-    // Potentially add --board-card-foreground-color if needed for text contrast on custom card colors
-    // For now, card text color will be default or determined by dark/light mode.
     return styles;
   }, [activeBoard?.theme]);
 
@@ -595,63 +596,65 @@ export function KanbanBoard() {
                     </CardTitle>
                   )}
                   {isBetaModeEnabled && (
-                    <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon" className="h-7 w-7">
-                                <MoreHorizontal className="h-4 w-4" />
-                            </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => handleEditColumnTitle(column.id, column.title)}>
-                                <Edit2 className="mr-2 h-4 w-4" /> Rename Column
-                            </DropdownMenuItem>
-                            <DropdownMenuSub>
-                                <DropdownMenuSubTrigger>
-                                    <ArrowUpDown className="mr-2 h-4 w-4" /> Sort Tasks By
-                                </DropdownMenuSubTrigger>
-                                <DropdownMenuPortal>
-                                <DropdownMenuSubContent>
-                                    <DropdownMenuItem onClick={() => handleColumnSortChange(column.id, 'default')}>Default</DropdownMenuItem>
-                                    <DropdownMenuItem onClick={() => handleColumnSortChange(column.id, 'priority')}>Priority</DropdownMenuItem>
-                                    <DropdownMenuItem onClick={() => handleColumnSortChange(column.id, 'deadline')}>Deadline</DropdownMenuItem>
-                                    <DropdownMenuItem onClick={() => handleColumnSortChange(column.id, 'title')}>Title</DropdownMenuItem>
-                                    <DropdownMenuItem onClick={() => handleColumnSortChange(column.id, 'createdAt')}>Date Created</DropdownMenuItem>
-                                </DropdownMenuSubContent>
-                                </DropdownMenuPortal>
-                            </DropdownMenuSub>
-                             <DropdownMenuSeparator />
-                             <div className="p-2 space-y-1">
-                                <Label htmlFor={`wip-${column.id}`} className="text-xs px-1">WIP Limit (0 for none)</Label>
-                                <Input
-                                    id={`wip-${column.id}`}
-                                    type="number"
-                                    min="0"
-                                    placeholder="None"
-                                    defaultValue={column.wipLimit === undefined ? '' : column.wipLimit}
-                                    onChange={(e) => handleUpdateWipLimit(column.id, e.target.value)}
-                                    className="h-8 text-sm"
-                                />
-                             </div>
-                            <DropdownMenuSeparator />
-                            <AlertDialogTrigger asChild>
-                               <DropdownMenuItem className="text-destructive focus:text-destructive focus:bg-destructive/10">
-                                <Trash2 className="mr-2 h-4 w-4" /> Delete Column
-                              </DropdownMenuItem>
-                            </AlertDialogTrigger>
-                             <AlertDialogContent>
-                                <AlertDialogHeader>
-                                <AlertDialogTitle>Delete Column &quot;{column.title}&quot;?</AlertDialogTitle>
-                                <AlertDialogDescription>
-                                    This will delete the column and all its tasks from the board &quot;{activeBoard.name}&quot;. This action cannot be undone.
-                                </AlertDialogDescription>
-                                </AlertDialogHeader>
-                                <AlertDialogFooter>
-                                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                <AlertDialogAction onClick={() => deleteColumn(column.id)} className={buttonVariants({variant: "destructive"})}>Delete</AlertDialogAction>
-                                </AlertDialogFooter>
-                            </AlertDialogContent>
-                        </DropdownMenuContent>
-                    </DropdownMenu>
+                     <AlertDialog> {/* Wrap DropdownMenu and AlertDialogContent */}
+                        <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="icon" className="h-7 w-7">
+                                    <MoreHorizontal className="h-4 w-4" />
+                                </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                                <DropdownMenuItem onClick={() => handleEditColumnTitle(column.id, column.title)}>
+                                    <Edit2 className="mr-2 h-4 w-4" /> Rename Column
+                                </DropdownMenuItem>
+                                <DropdownMenuSub>
+                                    <DropdownMenuSubTrigger>
+                                        <ArrowUpDown className="mr-2 h-4 w-4" /> Sort Tasks By
+                                    </DropdownMenuSubTrigger>
+                                    <DropdownMenuPortal>
+                                    <DropdownMenuSubContent>
+                                        <DropdownMenuItem onClick={() => handleColumnSortChange(column.id, 'default')}>Default</DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => handleColumnSortChange(column.id, 'priority')}>Priority</DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => handleColumnSortChange(column.id, 'deadline')}>Deadline</DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => handleColumnSortChange(column.id, 'title')}>Title</DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => handleColumnSortChange(column.id, 'createdAt')}>Date Created</DropdownMenuItem>
+                                    </DropdownMenuSubContent>
+                                    </DropdownMenuPortal>
+                                </DropdownMenuSub>
+                                <DropdownMenuSeparator />
+                                <div className="p-2 space-y-1">
+                                    <Label htmlFor={`wip-${column.id}`} className="text-xs px-1">WIP Limit (0 for none)</Label>
+                                    <Input
+                                        id={`wip-${column.id}`}
+                                        type="number"
+                                        min="0"
+                                        placeholder="None"
+                                        defaultValue={column.wipLimit === undefined ? '' : column.wipLimit}
+                                        onChange={(e) => handleUpdateWipLimit(column.id, e.target.value)}
+                                        className="h-8 text-sm"
+                                    />
+                                </div>
+                                <DropdownMenuSeparator />
+                                <AlertDialogTrigger asChild>
+                                <DropdownMenuItem className="text-destructive focus:text-destructive focus:bg-destructive/10">
+                                    <Trash2 className="mr-2 h-4 w-4" /> Delete Column
+                                </DropdownMenuItem>
+                                </AlertDialogTrigger>
+                            </DropdownMenuContent>
+                        </DropdownMenu>
+                        <AlertDialogContent>
+                            <AlertDialogHeader>
+                            <AlertDialogTitle>Delete Column &quot;{column.title}&quot;?</AlertDialogTitle>
+                            <AlertDialogDescription>
+                                This will delete the column and all its tasks from the board &quot;{activeBoard.name}&quot;. This action cannot be undone.
+                            </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                            <AlertDialogCancel>Cancel</AlertDialogCancel>
+                            <AlertDialogAction onClick={() => deleteColumn(column.id)} className={buttonVariants({variant: "destructive"})}>Delete</AlertDialogAction>
+                            </AlertDialogFooter>
+                        </AlertDialogContent>
+                    </AlertDialog>
                   )}
                 </CardHeader>
                 <ScrollArea className="h-[calc(100vh-18rem)] p-1 rounded-b-lg">
@@ -667,8 +670,8 @@ export function KanbanBoard() {
                      </div>
                   )}
                   {displayTasks.map(task => (
-                    <AlertDialog key={task.id}>
                        <TaskCard
+                        key={task.id} // Moved key to TaskCard as it's the direct child of map
                         task={task}
                         columnId={column.id}
                         onDragStart={handleDragStart}
@@ -683,7 +686,6 @@ export function KanbanBoard() {
                         getTaskById={getTaskById}
                         dragOverColumnId={dragOverColumnId}
                       />
-                    </AlertDialog>
                   ))}
                   </CardContent>
                 </ScrollArea>
@@ -714,3 +716,4 @@ export function KanbanBoard() {
     </div>
   );
 }
+
