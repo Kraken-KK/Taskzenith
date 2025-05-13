@@ -15,10 +15,10 @@ import {
   GoogleAuthProvider,
   signInWithPopup
 } from 'firebase/auth';
-import { doc, getDoc, setDoc, updateDoc, serverTimestamp, Timestamp, collection, addDoc, arrayUnion, arrayRemove, writeBatch, query, where, getDocs } from 'firebase/firestore'; // Firestore imports
+import { doc, getDoc, setDoc, updateDoc, serverTimestamp, Timestamp, collection, addDoc, arrayUnion, arrayRemove, writeBatch, query, where, getDocs, orderBy, limit } from 'firebase/firestore'; // Firestore imports
 import { useToast } from '@/hooks/use-toast';
 import { useRouter } from 'next/navigation';
-import type { Board, Task, Column, BoardGroup, Organization, Team } from '@/types'; // Ensure types are available
+import type { Board, Task, Column, BoardGroup, Organization, Team, ChatRoom } from '@/types'; // Ensure types are available
 import { formatISO } from 'date-fns';
 import type { InteractionStyle } from './SettingsContext';
 import type { MessageHistoryItem } from '@/ai/flows/chat-flow';
@@ -69,6 +69,7 @@ const getDefaultBoardForNewUser = (): Board => ({
   groupId: null, // Initialize groupId
   organizationId: null,
   teamId: null,
+  isPublic: false, // Fixed: Changed from isPublic?: boolean,
 });
 
 const defaultUserSettings = {
@@ -93,6 +94,7 @@ export interface AppUser {
   organizationMemberships?: string[]; 
   teamMemberships?: string[]; 
   defaultOrganizationId?: string | null; 
+  chatRoomIds?: string[]; // Added for chat feature
 }
 
 interface AuthContextType {
@@ -115,6 +117,7 @@ interface AuthContextType {
   getUserTeams: (organizationId?: string) => Promise<Team[]>;
   setCurrentOrganization: (organizationId: string | null) => Promise<void>;
   joinOrganizationByInviteCode: (inviteCode: string) => Promise<Organization | null>;
+  getUsersForChat: () => Promise<AppUser[]>; // New function for chat
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -145,6 +148,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     organizationMemberships: [], 
     teamMemberships: [],
     defaultOrganizationId: null,
+    chatRoomIds: [], // Initialize chatRoomIds
   });
 
   const mapSupabaseUserToAppUser = (supabaseUser: SupabaseUser): AppUser => ({
@@ -156,6 +160,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     organizationMemberships: [], 
     teamMemberships: [],
     defaultOrganizationId: null,
+    chatRoomIds: [], // Initialize chatRoomIds
   });
 
   const initializeFirestoreUserData = async (appUser: AppUser) => {
@@ -189,6 +194,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           organizationMemberships: [],
           teamMemberships: [],
           defaultOrganizationId: null,
+          chatRoomIds: [], // Initialize chatRoomIds for new user
         };
         console.log(`Firestore Init: Data for new user ${appUser.id}:`, JSON.stringify(newUserDocumentData, null, 2));
         await setDoc(userDocRef, newUserDocumentData);
@@ -211,6 +217,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             groupId: board.groupId === undefined ? null : board.groupId,
             organizationId: board.organizationId === undefined ? null : board.organizationId,
             teamId: board.teamId === undefined ? null : board.teamId,
+            isPublic: board.isPublic === undefined ? false : board.isPublic,
           }));
           if (JSON.stringify(updates.boards) !== JSON.stringify(userData.boards)) {
              needsUpdate = true;
@@ -250,6 +257,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
         if (userData.defaultOrganizationId === undefined) { 
           updates.defaultOrganizationId = null;
+          needsUpdate = true;
+        }
+        if (!userData.chatRoomIds || !Array.isArray(userData.chatRoomIds)) { // Check for chatRoomIds
+          updates.chatRoomIds = [];
           needsUpdate = true;
         }
         
@@ -314,6 +325,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 organizationMemberships: userData.organizationMemberships || [],
                 teamMemberships: userData.teamMemberships || [],
                 defaultOrganizationId: userData.defaultOrganizationId || null,
+                chatRoomIds: userData.chatRoomIds || [], // Load chatRoomIds
             };
         }
         
@@ -345,6 +357,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                     organizationMemberships: userData.organizationMemberships || [],
                     teamMemberships: userData.teamMemberships || [],
                     defaultOrganizationId: userData.defaultOrganizationId || null,
+                    chatRoomIds: userData.chatRoomIds || [], // Load chatRoomIds
                 };
             }
           setCurrentUser(finalAppUser);
@@ -823,6 +836,53 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const getUsersForChat = async (): Promise<AppUser[]> => {
+    if (!currentUser || isGuest) {
+        // toast({ title: "Login Required", description: "Please log in to use the chat feature.", variant: "destructive" });
+        return [];
+    }
+
+    const usersCollectionRef = collection(db, 'users');
+    let usersQuery;
+
+    if (currentUser.defaultOrganizationId) {
+        // Fetch users who are part of the current user's default organization
+        usersQuery = query(usersCollectionRef, where('organizationMemberships', 'array-contains', currentUser.defaultOrganizationId));
+    } else {
+        // No default organization, perhaps fetch all users (consider implications for large user bases)
+        // For now, let's return a limited set or an empty array if no org context.
+        // This part might need refinement based on product decisions (e.g., allow global chat or require org for chat).
+        // toast({ title: "Organization Needed", description: "Select a default organization to chat with its members.", variant: "default" });
+        usersQuery = query(usersCollectionRef, orderBy('displayName'), limit(50)); // Example: limit to 50 users if no org
+    }
+    
+    try {
+        const querySnapshot = await getDocs(usersQuery);
+        const users: AppUser[] = [];
+        querySnapshot.forEach(docSnap => {
+            if (docSnap.id !== currentUser.id) { // Exclude current user from the list
+                const data = docSnap.data();
+                users.push({
+                    id: docSnap.id,
+                    email: data.email,
+                    displayName: data.displayName,
+                    photoURL: data.photoURL,
+                    provider: data.provider,
+                    organizationMemberships: data.organizationMemberships || [],
+                    teamMemberships: data.teamMemberships || [],
+                    defaultOrganizationId: data.defaultOrganizationId || null,
+                    chatRoomIds: data.chatRoomIds || [],
+                });
+            }
+        });
+        return users;
+    } catch (error) {
+        console.error("Error fetching users for chat:", error);
+        toast({ title: "Error Fetching Users", description: "Could not load users for chat.", variant: "destructive" });
+        return [];
+    }
+  };
+
 
   const value = {
     currentUser,
@@ -844,6 +904,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     getUserTeams,
     setCurrentOrganization,
     joinOrganizationByInviteCode,
+    getUsersForChat,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

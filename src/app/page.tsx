@@ -21,7 +21,8 @@ import { AiChat } from "@/components/ai-chat";
 import { SettingsView } from '@/components/settings-view';
 import { PrioritizeTasksView } from '@/components/prioritize-tasks-view';
 import { SmartTaskCreationView } from '@/components/smart-task-creation-view';
-import { Bot, CheckSquare, ListTodo, Settings, Star, Menu, FolderKanban, PlusCircle, Edit3, Trash2, Palette, LogOut, Database, Zap, User, Chrome, FolderPlus, FolderSymlink, Folders, Users, Building, Briefcase } from "lucide-react"; // Added Users, Building for org/team
+import { ChatLayout } from '@/components/chat/ChatLayout'; // Import ChatLayout
+import { Bot, CheckSquare, ListTodo, Settings, Star, Menu, FolderKanban, PlusCircle, Edit3, Trash2, Palette, LogOut, Database, Zap, User, Chrome, FolderPlus, FolderSymlink, Folders, Users, Building, Briefcase, MessageSquare, LogIn } from "lucide-react"; // Added MessageSquare, Users, Building for org/team
 import { useSidebar } from '@/components/ui/sidebar';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -34,6 +35,7 @@ import { CreateBoardGroupDialog } from '@/components/create-board-group-dialog';
 import { RenameBoardGroupDialog } from '@/components/rename-board-group-dialog';
 import { CreateOrganizationDialog } from '@/components/create-organization-dialog';
 import { CreateTeamDialog } from '@/components/create-team-dialog';
+import { JoinOrganizationDialog } from '@/components/join-organization-dialog';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -63,12 +65,12 @@ import { useToast } from '@/hooks/use-toast';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 
 
-type ActiveView = 'board' | 'ai-assistant' | 'prioritize' | 'smart-create' | 'settings' | 'organizations' | 'teams';
+type ActiveView = 'board' | 'ai-assistant' | 'prioritize' | 'smart-create' | 'settings' | 'organizations' | 'teams' | 'chat'; // Added 'chat'
 
 export default function Home() {
   const { 
     currentUser, loading: authLoading, logout, currentProvider, isGuest, exitGuestMode, 
-    createOrganization, createTeam, getUserOrganizations, getUserTeams, setCurrentOrganization 
+    createOrganization, createTeam, getUserOrganizations, getUserTeams, setCurrentOrganization, joinOrganizationByInviteCode
   } = useAuth();
   const router = useRouter();
   const [activeView, setActiveView] = useState<ActiveView>('board');
@@ -91,6 +93,7 @@ export default function Home() {
 
   // State for new co-working features
   const [isCreateOrgDialogOpen, setIsCreateOrgDialogOpen] = useState(false);
+  const [isJoinOrgDialogOpen, setIsJoinOrgDialogOpen] = useState(false);
   const [isCreateTeamDialogOpen, setIsCreateTeamDialogOpen] = useState(false);
   const [userOrganizations, setUserOrganizations] = useState<Organization[]>([]);
   const [userTeams, setUserTeams] = useState<Team[]>([]);
@@ -108,25 +111,20 @@ export default function Home() {
       setActiveBoardId(boards[0].id);
     }
   }, [activeBoardId, boards, setActiveBoardId, currentUser, isGuest]);
-
-  // Fetch user's organizations and teams
-  useEffect(() => {
+  
+  const fetchUserOrgsAndTeams = useCallback(async () => {
     if (currentUser && !isGuest) {
-        const fetchOrgAndTeams = async () => {
-            const orgs = await getUserOrganizations();
-            setUserOrganizations(orgs);
-            if (currentUser.defaultOrganizationId) {
-                const teams = await getUserTeams(currentUser.defaultOrganizationId);
-                setUserTeams(teams);
-            } else if (orgs.length > 0) {
-                // If no default org, but orgs exist, fetch teams for the first one as a fallback display
-                const teams = await getUserTeams(orgs[0].id);
-                setUserTeams(teams);
-            } else {
-                setUserTeams([]);
-            }
-        };
-        fetchOrgAndTeams();
+        const orgs = await getUserOrganizations();
+        setUserOrganizations(orgs);
+        if (currentUser.defaultOrganizationId) {
+            const teams = await getUserTeams(currentUser.defaultOrganizationId);
+            setUserTeams(teams);
+        } else if (orgs.length > 0) {
+            const teams = await getUserTeams(orgs[0].id); // Fallback for display
+            setUserTeams([]);
+        } else {
+            setUserTeams([]);
+        }
     } else {
         setUserOrganizations([]);
         setUserTeams([]);
@@ -134,7 +132,13 @@ export default function Home() {
   }, [currentUser, isGuest, getUserOrganizations, getUserTeams]);
 
 
-  if (authLoading || (!currentUser && !isGuest)) { 
+  // Fetch user's organizations and teams
+  useEffect(() => {
+    fetchUserOrgsAndTeams();
+  }, [fetchUserOrgsAndTeams, currentUser?.defaultOrganizationId]); // Added defaultOrganizationId as dependency
+
+
+  if (authLoading || (!currentUser && !isGuest && activeView !== 'chat')) {  // Allow chat view for guests too, maybe? For now, restricted.
     return (
       <div className="flex h-screen w-screen items-center justify-center bg-background">
         <svg className="animate-spin h-12 w-12 text-primary" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -156,6 +160,7 @@ export default function Home() {
       case 'settings': return 'Settings';
       case 'organizations': return 'My Organizations';
       case 'teams': return currentOrg ? `Teams in ${currentOrg.name}` : 'My Teams';
+      case 'chat': return 'Team Chat'; // New header for chat
       default: return 'TaskZenith';
     }
   };
@@ -235,13 +240,7 @@ export default function Home() {
   
   const handleSetCurrentOrg = async (orgId: string | null) => {
     await setCurrentOrganization(orgId);
-    // Refetch teams for the new current org
-    if (orgId) {
-        const teams = await getUserTeams(orgId);
-        setUserTeams(teams);
-    } else {
-        setUserTeams([]); // No default org, clear teams or fetch all teams user is part of
-    }
+    // Refetch teams will be handled by useEffect hook watching currentUser.defaultOrganizationId
   };
 
   return (
@@ -290,9 +289,12 @@ export default function Home() {
                         {org.name} {org.id === currentUser.defaultOrganizationId && "(Active)"}
                       </DropdownMenuItem>
                     ))}
-                    <DropdownMenuSeparator />
+                     <DropdownMenuSeparator />
                      <DropdownMenuItem onClick={() => setIsCreateOrgDialogOpen(true)}>
-                       <PlusCircle className="mr-2 h-4 w-4" /> Create New Organization
+                       <PlusCircle className="mr-2 h-4 w-4" /> Create Organization
+                     </DropdownMenuItem>
+                     <DropdownMenuItem onClick={() => setIsJoinOrgDialogOpen(true)}>
+                       <LogIn className="mr-2 h-4 w-4" /> Join Organization
                      </DropdownMenuItem>
                      {currentUser.defaultOrganizationId && (
                         <DropdownMenuItem onClick={() => handleSetCurrentOrg(null)}>
@@ -556,6 +558,18 @@ export default function Home() {
              </SidebarMenuItem>
              <SidebarMenuItem>
                <SidebarMenuButton
+                  tooltip="Team Chat"
+                  isActive={activeView === 'chat'}
+                  onClick={() => setActiveView('chat')}
+                  className="hover:bg-sidebar-accent/80 dark:hover:bg-sidebar-accent/50"
+                  disabled={authLoading && !currentUser && !isGuest && !currentUser?.defaultOrganizationId} // Disable if not logged in, or no org
+                >
+                  <MessageSquare />
+                  Chat
+                </SidebarMenuButton>
+             </SidebarMenuItem>
+             <SidebarMenuItem>
+               <SidebarMenuButton
                   tooltip="Prioritize Tasks"
                   isActive={activeView === 'prioritize'}
                   onClick={() => setActiveView('prioritize')}
@@ -656,6 +670,7 @@ export default function Home() {
             </div>
           )}
           {activeView === 'ai-assistant' && <AiChat />}
+          {activeView === 'chat' && <ChatLayout />}
           {activeView === 'prioritize' && <PrioritizeTasksView />}
           {activeView === 'smart-create' && <SmartTaskCreationView />}
           {activeView === 'settings' && <SettingsView />}
@@ -676,9 +691,14 @@ export default function Home() {
                   ))}
                 </ul>
               )}
-              <Button onClick={() => setIsCreateOrgDialogOpen(true)} className="mt-4">
-                <Briefcase className="mr-2 h-4 w-4" /> Create Organization
-              </Button>
+               <div className="flex flex-col sm:flex-row gap-2 mt-4">
+                 <Button onClick={() => setIsCreateOrgDialogOpen(true)} className="flex-1">
+                    <Briefcase className="mr-2 h-4 w-4" /> Create Organization
+                  </Button>
+                  <Button onClick={() => setIsJoinOrgDialogOpen(true)} variant="outline" className="flex-1">
+                     <LogIn className="mr-2 h-4 w-4" /> Join by Code
+                  </Button>
+               </div>
             </div>
           )}
           {/* Placeholder for Teams View */}
@@ -718,14 +738,22 @@ export default function Home() {
         open={isCreateOrgDialogOpen} 
         onOpenChange={(isOpen) => {
             setIsCreateOrgDialogOpen(isOpen);
-            if(isOpen === false) getUserOrganizations().then(setUserOrganizations); // Refresh list on close
+            if(isOpen === false) fetchUserOrgsAndTeams();
         }}
+      />
+      <JoinOrganizationDialog
+        open={isJoinOrgDialogOpen}
+        onOpenChange={(isOpen) => {
+            setIsJoinOrgDialogOpen(isOpen);
+            if(isOpen === false) fetchUserOrgsAndTeams();
+        }}
+        onOrgJoined={fetchUserOrgsAndTeams}
       />
       <CreateTeamDialog
         open={isCreateTeamDialogOpen}
         onOpenChange={(isOpen) => {
             setIsCreateTeamDialogOpen(isOpen);
-            if(isOpen === false && selectedOrgForTeamCreation) getUserTeams(selectedOrgForTeamCreation).then(setUserTeams); // Refresh list on close
+            if(isOpen === false) fetchUserOrgsAndTeams();
         }}
         organizationId={selectedOrgForTeamCreation}
       />

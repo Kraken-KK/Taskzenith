@@ -82,3 +82,30 @@ export interface Organization {
   inviteCode: string; // 5-character alphanumeric invite code
 }
 
+// ---- Chat Feature Types ----
+
+export interface ChatMessage {
+  id: string;
+  chatRoomId: string;
+  senderId: string;
+  senderDisplayName: string;
+  text: string;
+  createdAt: string; // ISO string for Firestore serverTimestamp
+}
+
+export interface ChatRoom {
+  id: string;
+  type: 'private' | 'group'; // Initially focusing on 'private'
+  memberIds: string[]; // Array of user IDs
+  // For private chats, memberDisplayNames helps show the other user's name easily
+  memberDisplayNames: { [userId: string]: string }; 
+  name?: string; // Only for group chats
+  lastMessageText?: string;
+  lastMessageAt?: string; // ISO string for Firestore serverTimestamp
+  lastMessageSenderId?: string;
+  createdAt: string; // ISO string for Firestore serverTimestamp
+  // For group chats (future)
+  createdBy?: string; 
+  groupAdmins?: string[];
+  groupImage?: string;
+}
