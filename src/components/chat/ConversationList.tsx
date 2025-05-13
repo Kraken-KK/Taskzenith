@@ -29,11 +29,10 @@ export function ConversationList({
         return {
           id: otherMemberId,
           displayName: room.memberDisplayNames[otherMemberId] || 'Unknown User',
-          // photoURL: userMap[otherMemberId]?.photoURL // If you have a userMap with photoURLs
         };
       }
     }
-    return { id: '', displayName: room.name || 'Group Chat' }; // Fallback for group or if info missing
+    return { id: '', displayName: room.name || 'Group Chat' }; 
   };
 
   return (
@@ -58,24 +57,23 @@ export function ConversationList({
               key={room.id}
               onClick={() => onSelectChatRoom(room)}
               className={cn(
-                'w-full flex items-center gap-3 p-2.5 rounded-lg text-left transition-colors duration-150 ease-in-out',
+                'w-full flex items-center gap-2.5 sm:gap-3 p-2 sm:p-2.5 rounded-lg text-left transition-colors duration-150 ease-in-out',
                 isActive
                   ? 'bg-primary/15 text-primary font-medium shadow-sm'
                   : 'hover:bg-muted/60 dark:hover:bg-neutral-700/60',
                 !isActive && 'text-foreground'
               )}
             >
-              <Avatar className="h-10 w-10 border-2 border-transparent group-hover:border-primary/30 transition-colors">
-                {/* <AvatarImage src={otherMember.photoURL} alt={otherMember.displayName} /> */}
-                <AvatarFallback className={cn(isActive ? 'bg-primary/20' : 'bg-muted')}>
-                    {otherMember.displayName.charAt(0).toUpperCase() || <User className="h-5 w-5"/>}
+              <Avatar className="h-9 w-9 sm:h-10 sm:w-10 border-2 border-transparent group-hover:border-primary/30 transition-colors shrink-0">
+                <AvatarFallback className={cn("text-sm sm:text-base", isActive ? 'bg-primary/20' : 'bg-muted')}>
+                    {otherMember.displayName.charAt(0).toUpperCase() || <User className="h-4 w-4 sm:h-5 sm:w-5"/>}
                 </AvatarFallback>
               </Avatar>
               <div className="flex-1 min-w-0">
                 <div className="flex justify-between items-center">
                     <h3 className="text-sm font-semibold truncate">{otherMember.displayName}</h3>
                     {room.lastMessageAt && (
-                        <span className="text-xs text-muted-foreground whitespace-nowrap">
+                        <span className="text-[10px] sm:text-xs text-muted-foreground whitespace-nowrap ml-1">
                             {lastMessageTime}
                         </span>
                     )}
