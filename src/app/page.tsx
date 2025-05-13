@@ -1,7 +1,7 @@
 
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react'; // Added useCallback
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import {
@@ -120,8 +120,8 @@ export default function Home() {
             const teams = await getUserTeams(currentUser.defaultOrganizationId);
             setUserTeams(teams);
         } else if (orgs.length > 0) {
-            const teams = await getUserTeams(orgs[0].id); // Fallback for display
-            setUserTeams([]);
+            // const teams = await getUserTeams(orgs[0].id); // Fallback for display
+            setUserTeams([]); // If no default org, don't load teams for an arbitrary org
         } else {
             setUserTeams([]);
         }
@@ -760,3 +760,4 @@ export default function Home() {
     </div>
   );
 }
+
