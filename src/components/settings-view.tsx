@@ -16,7 +16,7 @@ import {
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
-import { Moon, Sun, Laptop, Zap, MessageCircle, LogOut, UserCircle, Database, Chrome, Building, Users, PlusCircle, Briefcase, ClipboardCopy, Check } from 'lucide-react'; 
+import { Moon, Sun, Laptop, Zap, MessageCircle, LogOut, UserCircle, Database, Chrome, Building, Users, PlusCircle, Briefcase, ClipboardCopy, Check, LogIn } from 'lucide-react'; 
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'; 
 import { cn } from '@/lib/utils';
 import type { Organization, Team } from '@/types'; 
