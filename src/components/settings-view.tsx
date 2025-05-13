@@ -1,7 +1,7 @@
 
 'use client';
 
-import React, { useEffect, useState } from 'react'; // Added useEffect, useState
+import React, { useEffect, useState } from 'react'; 
 import { useTheme } from '@/contexts/ThemeContext';
 import { useSettings, type InteractionStyle } from '@/contexts/SettingsContext';
 import { useAuth } from '@/contexts/AuthContext'; 
@@ -16,13 +16,15 @@ import {
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
-import { Moon, Sun, Laptop, Zap, MessageCircle, LogOut, UserCircle, Database, Chrome, Building, Users, PlusCircle, Briefcase } from 'lucide-react'; // Added Building, Users, PlusCircle
+import { Moon, Sun, Laptop, Zap, MessageCircle, LogOut, UserCircle, Database, Chrome, Building, Users, PlusCircle, Briefcase, ClipboardCopy, Check } from 'lucide-react'; 
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'; 
 import { cn } from '@/lib/utils';
-import type { Organization, Team } from '@/types'; // Import Organization, Team types
-import { CreateOrganizationDialog } from './create-organization-dialog'; // Import dialog
-import { CreateTeamDialog } from './create-team-dialog'; // Import dialog
+import type { Organization, Team } from '@/types'; 
+import { CreateOrganizationDialog } from './create-organization-dialog'; 
+import { CreateTeamDialog } from './create-team-dialog'; 
+import { JoinOrganizationDialog } from './join-organization-dialog'; // Import JoinOrganizationDialog
 import { ScrollArea } from './ui/scroll-area';
+import { useToast } from '@/hooks/use-toast';
 
 
 const interactionStyleOptions: { value: InteractionStyle; label: string; description: string }[] = [
@@ -36,15 +38,18 @@ export function SettingsView() {
   const { theme, setTheme } = useTheme();
   const { isBetaModeEnabled, setIsBetaModeEnabled, interactionStyle, setInteractionStyle } = useSettings();
   const { 
-    currentUser, logout, loading: authLoading, currentProvider, isGuest, // Added isGuest here
+    currentUser, logout, loading: authLoading, currentProvider, isGuest, 
     getUserOrganizations, getUserTeams, createOrganization, createTeam, setCurrentOrganization 
   } = useAuth(); 
+  const { toast } = useToast();
 
   const [userOrganizations, setUserOrganizations] = useState<Organization[]>([]);
   const [userTeams, setUserTeams] = useState<Team[]>([]);
   const [isCreateOrgDialogOpen, setIsCreateOrgDialogOpen] = useState(false);
   const [isCreateTeamDialogOpen, setIsCreateTeamDialogOpen] = useState(false);
+  const [isJoinOrgDialogOpen, setIsJoinOrgDialogOpen] = useState(false); // State for join dialog
   const [selectedOrgForTeamCreation, setSelectedOrgForTeamCreation] = useState<string | null>(null);
+  const [copiedCode, setCopiedCode] = useState<string | null>(null);
 
   const fetchUserOrgsAndTeams = async () => {
     if (currentUser && !isGuest) {
@@ -54,8 +59,7 @@ export function SettingsView() {
         const teams = await getUserTeams(currentUser.defaultOrganizationId);
         setUserTeams(teams);
       } else if (orgs.length > 0) {
-        // If no default, but orgs exist, perhaps fetch for the first one or show a message
-        const teams = await getUserTeams(orgs[0].id); // Example: fetch for first org
+        const teams = await getUserTeams(orgs[0].id); 
         setUserTeams(teams);
       } else {
         setUserTeams([]);
@@ -67,16 +71,27 @@ export function SettingsView() {
     if (currentUser && !isGuest) {
       fetchUserOrgsAndTeams();
     }
-  }, [currentUser, isGuest]); 
+  }, [currentUser, isGuest, currentUser?.defaultOrganizationId]); // Re-fetch if defaultOrganizationId changes
 
   const handleSetCurrentOrg = async (orgId: string | null) => {
     await setCurrentOrganization(orgId);
-    fetchUserOrgsAndTeams(); // Refresh orgs and teams list
+    // fetchUserOrgsAndTeams will be triggered by useEffect due to currentUser.defaultOrganizationId change
   };
 
   const handleOpenCreateTeamDialog = (orgId: string) => {
     setSelectedOrgForTeamCreation(orgId);
     setIsCreateTeamDialogOpen(true);
+  };
+  
+  const handleCopyInviteCode = (code: string) => {
+    navigator.clipboard.writeText(code).then(() => {
+      setCopiedCode(code);
+      toast({ title: "Copied!", description: "Invite code copied to clipboard." });
+      setTimeout(() => setCopiedCode(null), 2000);
+    }).catch(err => {
+      console.error('Failed to copy invite code: ', err);
+      toast({ title: "Copy Failed", description: "Could not copy invite code.", variant: "destructive" });
+    });
   };
 
 
@@ -105,7 +120,7 @@ export function SettingsView() {
 
 
   return (
-    <ScrollArea className="h-[calc(100vh-8rem)]"> {/* Adjust height as needed */}
+    <ScrollArea className="h-[calc(100vh-8rem)]"> 
     <div className="max-w-2xl mx-auto space-y-8 p-1">
       <Card className="shadow-xl interactive-card-hover">
         <CardHeader>
@@ -229,31 +244,45 @@ export function SettingsView() {
         </CardFooter>
       </Card>
       
-      {/* Organizations Management Section */}
       {currentUser && !isGuest && (
         <Card className="shadow-xl interactive-card-hover">
           <CardHeader>
             <CardTitle className="flex items-center gap-2"><Briefcase className="h-5 w-5 text-primary"/> My Organizations</CardTitle>
-            <CardDescription>Manage your organizations or create a new one.</CardDescription>
+            <CardDescription>Manage your organizations, create a new one, or join using an invite code.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             {userOrganizations.length === 0 ? (
               <p className="text-sm text-muted-foreground">You are not part of any organization yet.</p>
             ) : (
-              <ul className="space-y-2">
+              <ul className="space-y-3">
                 {userOrganizations.map(org => (
-                  <li key={org.id} className="flex justify-between items-center p-3 border rounded-md shadow-sm">
-                    <span>{org.name} {org.id === currentUser.defaultOrganizationId && <span className="text-xs text-primary ml-1">(Active)</span>}</span>
-                    <Button variant={org.id === currentUser.defaultOrganizationId ? "secondary" : "outline" } size="sm" onClick={() => handleSetCurrentOrg(org.id)} disabled={org.id === currentUser.defaultOrganizationId}>
-                      {org.id === currentUser.defaultOrganizationId ? "Active Org" : "Set Active"}
-                    </Button>
+                  <li key={org.id} className="p-3 border rounded-md shadow-sm space-y-2">
+                    <div className="flex justify-between items-center">
+                        <span className="font-medium">{org.name} {org.id === currentUser.defaultOrganizationId && <span className="text-xs text-primary ml-1">(Active)</span>}</span>
+                        <Button variant={org.id === currentUser.defaultOrganizationId ? "secondary" : "outline" } size="sm" onClick={() => handleSetCurrentOrg(org.id)} disabled={org.id === currentUser.defaultOrganizationId}>
+                        {org.id === currentUser.defaultOrganizationId ? "Active Org" : "Set Active"}
+                        </Button>
+                    </div>
+                    {org.ownerId === currentUser.id && org.inviteCode && (
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground border-t pt-2 mt-2">
+                            <span>Invite Code: <strong className="text-foreground tracking-wider">{org.inviteCode}</strong></span>
+                            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleCopyInviteCode(org.inviteCode)}>
+                                {copiedCode === org.inviteCode ? <Check className="h-4 w-4 text-green-500" /> : <ClipboardCopy className="h-4 w-4" />}
+                            </Button>
+                        </div>
+                    )}
                   </li>
                 ))}
               </ul>
             )}
-             <Button onClick={() => setIsCreateOrgDialogOpen(true)} className="w-full mt-2">
-                <PlusCircle className="mr-2 h-4 w-4" /> Create New Organization
-              </Button>
+            <div className="flex flex-col sm:flex-row gap-2 mt-4">
+                 <Button onClick={() => setIsCreateOrgDialogOpen(true)} className="flex-1">
+                    <PlusCircle className="mr-2 h-4 w-4" /> Create New Organization
+                  </Button>
+                  <Button onClick={() => setIsJoinOrgDialogOpen(true)} variant="outline" className="flex-1">
+                     <LogIn className="mr-2 h-4 w-4" /> Join Organization
+                  </Button>
+            </div>
               {currentUser.defaultOrganizationId && (
                  <Button variant="outline" onClick={() => handleSetCurrentOrg(null)} className="w-full mt-2">
                     Clear Default Organization
@@ -263,7 +292,6 @@ export function SettingsView() {
         </Card>
       )}
 
-      {/* Teams Management Section (Contextual to Default Organization) */}
       {currentUser && !isGuest && currentUser.defaultOrganizationId && (
         <Card className="shadow-xl interactive-card-hover">
           <CardHeader>
@@ -278,7 +306,6 @@ export function SettingsView() {
                 {userTeams.map(team => (
                   <li key={team.id} className="flex justify-between items-center p-3 border rounded-md shadow-sm">
                     <span>{team.name}</span>
-                    {/* Placeholder for Join/Manage Team Button */}
                     <Button variant="outline" size="sm" onClick={() => alert(`Manage team ${team.name} - Not implemented`)}>Manage</Button>
                   </li>
                 ))}
@@ -299,16 +326,23 @@ export function SettingsView() {
         open={isCreateOrgDialogOpen} 
         onOpenChange={(isOpen) => {
             setIsCreateOrgDialogOpen(isOpen);
-            if(!isOpen) fetchUserOrgsAndTeams(); // Refresh on close
+            if(!isOpen) fetchUserOrgsAndTeams(); 
         }} 
       />
       <CreateTeamDialog 
         open={isCreateTeamDialogOpen} 
         onOpenChange={(isOpen) => {
             setIsCreateTeamDialogOpen(isOpen);
-            if(!isOpen) fetchUserOrgsAndTeams(); // Refresh on close
+            if(!isOpen) fetchUserOrgsAndTeams(); 
         }} 
         organizationId={selectedOrgForTeamCreation} 
+      />
+       <JoinOrganizationDialog
+        open={isJoinOrgDialogOpen}
+        onOpenChange={(isOpen) => {
+          setIsJoinOrgDialogOpen(isOpen);
+        }}
+        onOrgJoined={fetchUserOrgsAndTeams} // Refresh org list after successfully joining
       />
     </div>
     </ScrollArea>

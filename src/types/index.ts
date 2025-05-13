@@ -79,4 +79,6 @@ export interface Organization {
   teamIds?: string[]; // Optional: List of team IDs within this organization
   createdAt: string;
   description?: string;
+  inviteCode: string; // 5-character alphanumeric invite code
 }
+
