@@ -48,7 +48,7 @@ export interface Board {
   groupId?: string | null; // Optional: ID of the group this board belongs to
   organizationId?: string | null; // For associating with an organization
   teamId?: string | null; // For associating with a team
-  isPublic: boolean; 
+  isPublic: boolean;
 }
 
 // Define the structure of a Board Group
@@ -112,14 +112,14 @@ export interface ChatRoom {
   type: 'private' | 'group'; // Initially focusing on 'private'
   memberIds: string[]; // Array of user IDs
   // For private chats, memberDisplayNames helps show the other user's name easily
-  memberDisplayNames: { [userId: string]: string }; 
+  memberDisplayNames: { [userId: string]: string };
   name?: string; // Only for group chats
   lastMessageText?: string;
   lastMessageAt?: string; // ISO string for Firestore serverTimestamp
   lastMessageSenderId?: string;
   createdAt: string; // ISO string for Firestore serverTimestamp
   // For group chats (future)
-  createdBy?: string; 
+  createdBy?: string;
   groupAdmins?: string[];
   groupImage?: string;
 }

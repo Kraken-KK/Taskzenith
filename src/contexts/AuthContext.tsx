@@ -6,10 +6,10 @@ import type { User as SupabaseUser, AuthError as SupabaseAuthError, Session as S
 import { createContext, useContext, useEffect, useState, type ReactNode, useCallback } from 'react';
 import { auth as firebaseAuth, db } from '@/lib/firebase'; // Import db
 import { supabase } from '@/lib/supabaseClient';
-import { 
-  onAuthStateChanged as onFirebaseAuthStateChanged, 
-  createUserWithEmailAndPassword as createUserWithFirebase, 
-  signInWithEmailAndPassword as signInWithFirebase, 
+import {
+  onAuthStateChanged as onFirebaseAuthStateChanged,
+  createUserWithEmailAndPassword as createUserWithFirebase,
+  signInWithEmailAndPassword as signInWithFirebase,
   signOut as signOutFirebase,
   updateProfile as updateFirebaseProfile,
   GoogleAuthProvider,
@@ -21,7 +21,7 @@ import { useRouter } from 'next/navigation';
 import type { Board, Task, Column, BoardGroup, Organization, Team, ChatRoom } from '@/types'; // Ensure types are available
 import { formatISO } from 'date-fns';
 import type { InteractionStyle } from './SettingsContext';
-import type { MessageHistoryItem } from '@/ai/flows/chat-flow';
+import type { MessageHistoryItem } from '@/ai/schemas';
 
 
 // Helper to generate unique IDs
@@ -69,7 +69,7 @@ const getDefaultBoardForNewUser = (): Board => ({
   groupId: null, // Initialize groupId
   organizationId: null,
   teamId: null,
-  isPublic: false, // Fixed: Changed from isPublic?: boolean,
+  isPublic: false,
 });
 
 const defaultUserSettings = {
@@ -91,9 +91,9 @@ export interface AppUser {
   displayName: string | null;
   photoURL?: string | null;
   provider: AuthProviderType | 'google';
-  organizationMemberships?: string[]; 
-  teamMemberships?: string[]; 
-  defaultOrganizationId?: string | null; 
+  organizationMemberships?: string[];
+  teamMemberships?: string[];
+  defaultOrganizationId?: string | null;
   chatRoomIds?: string[]; // Added for chat feature
 }
 
@@ -112,7 +112,7 @@ interface AuthContextType {
   exitGuestMode: () => void;
   createOrganization: (name: string, description?: string) => Promise<Organization | null>;
   createTeam: (name: string, organizationId: string, description?: string) => Promise<Team | null>;
-  joinTeam: (teamId: string) => Promise<boolean>; 
+  joinTeam: (teamId: string) => Promise<boolean>;
   getUserOrganizations: () => Promise<Organization[]>;
   getUserTeams: (organizationId?: string) => Promise<Team[]>;
   setCurrentOrganization: (organizationId: string | null) => Promise<void>;
@@ -145,7 +145,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     displayName: firebaseUser.displayName,
     photoURL: firebaseUser.photoURL,
     provider: providerOverride || 'firebase',
-    organizationMemberships: [], 
+    organizationMemberships: [],
     teamMemberships: [],
     defaultOrganizationId: null,
     chatRoomIds: [], // Initialize chatRoomIds
@@ -157,7 +157,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     displayName: supabaseUser.user_metadata?.displayName || supabaseUser.email?.split('@')[0] || 'User',
     photoURL: supabaseUser.user_metadata?.avatar_url,
     provider: 'supabase',
-    organizationMemberships: [], 
+    organizationMemberships: [],
     teamMemberships: [],
     defaultOrganizationId: null,
     chatRoomIds: [], // Initialize chatRoomIds
@@ -189,7 +189,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           boards: [defaultBoard],
           activeBoardId: defaultBoard.id,
           settings: defaultUserSettings,
-          aiChatHistory: defaultAiChatHistory,
+          aiChatHistory: defaultAiChatHistory, // Initialize with new structure
           boardGroups: [] as BoardGroup[],
           organizationMemberships: [],
           teamMemberships: [],
@@ -207,7 +207,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         let needsUpdate = false;
 
         if (!userData.boards || !Array.isArray(userData.boards) || userData.boards.length === 0) {
-          updates.boards = [defaultBoard]; 
+          updates.boards = [defaultBoard];
           updates.activeBoardId = defaultBoard.id;
           needsUpdate = true;
           console.log(`Firestore Init: User ${appUser.id} - boards missing or empty. Adding default board.`);
@@ -224,10 +224,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
              console.log(`Firestore Init: User ${appUser.id} - updated boards with groupId/orgId/teamId.`);
           }
         }
-        
+
         if (!userData.activeBoardId && updates.boards && updates.boards.length > 0) {
           updates.activeBoardId = updates.boards[0].id;
-          needsUpdate = true; 
+          needsUpdate = true;
         } else if (userData.activeBoardId && userData.boards && !userData.boards.find((b: Board) => b.id === userData.activeBoardId) && userData.boards.length > 0) {
           updates.activeBoardId = userData.boards[0].id;
           needsUpdate = true;
@@ -239,11 +239,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           updates.settings = defaultUserSettings;
           needsUpdate = true;
         }
-        if (!userData.aiChatHistory) {
+        // Ensure aiChatHistory field exists with the correct structure
+        if (!userData.aiChatHistory || typeof userData.aiChatHistory.messages === 'undefined') {
           updates.aiChatHistory = defaultAiChatHistory;
           needsUpdate = true;
         }
-        if (!userData.boardGroups || !Array.isArray(userData.boardGroups)) { 
+        if (!userData.boardGroups || !Array.isArray(userData.boardGroups)) {
           updates.boardGroups = [];
           needsUpdate = true;
         }
@@ -255,7 +256,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           updates.teamMemberships = [];
           needsUpdate = true;
         }
-        if (userData.defaultOrganizationId === undefined) { 
+        if (userData.defaultOrganizationId === undefined) {
           updates.defaultOrganizationId = null;
           needsUpdate = true;
         }
@@ -263,7 +264,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           updates.chatRoomIds = [];
           needsUpdate = true;
         }
-        
+
         if (appUser.email && userData.email !== appUser.email) {
             updates.email = appUser.email; needsUpdate = true;
         }
@@ -289,10 +290,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       console.error(`Firestore Init: CRITICAL ERROR during Firestore operation for user ${appUser.id}:`, error);
       const errorMessage = error instanceof Error ? error.message : String(error);
-      toast({ 
-        title: 'Data Sync Error', 
-        description: `Could not save user data: ${errorMessage}.`, 
-        variant: 'destructive', 
+      toast({
+        title: 'Data Sync Error',
+        description: `Could not save user data: ${errorMessage}.`,
+        variant: 'destructive',
       });
     }
   };
@@ -307,14 +308,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setCurrentUser(null);
       setCurrentProvider(null);
       setLoading(false);
-      return; 
+      return;
     }
 
     const unsubscribeFirebase = onFirebaseAuthStateChanged(firebaseAuth, async (firebaseUser) => {
-      if (firebaseUser && !isGuest) { 
+      if (firebaseUser && !isGuest) {
         const isGoogleSignIn = firebaseUser.providerData.some(pd => pd.providerId === GoogleAuthProvider.PROVIDER_ID);
         const baseAppUser = mapFirebaseUserToAppUser(firebaseUser, isGoogleSignIn ? 'google' : undefined);
-        
+
         const userDocRef = doc(db, 'users', baseAppUser.id);
         const userDocSnap = await getDoc(userDocRef);
         let finalAppUser = baseAppUser;
@@ -328,12 +329,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 chatRoomIds: userData.chatRoomIds || [], // Load chatRoomIds
             };
         }
-        
+
         setCurrentUser(finalAppUser);
         setCurrentProvider(isGoogleSignIn ? 'google' : 'firebase');
         if (typeof window !== 'undefined') localStorage.setItem(AUTH_PROVIDER_STORAGE_KEY, isGoogleSignIn ? 'google' : 'firebase');
-        await initializeFirestoreUserData(finalAppUser); 
-      } else if (typeof window !== 'undefined' && (localStorage.getItem(AUTH_PROVIDER_STORAGE_KEY) === 'firebase' || localStorage.getItem(AUTH_PROVIDER_STORAGE_KEY) === 'google')) { 
+        await initializeFirestoreUserData(finalAppUser);
+      } else if (typeof window !== 'undefined' && (localStorage.getItem(AUTH_PROVIDER_STORAGE_KEY) === 'firebase' || localStorage.getItem(AUTH_PROVIDER_STORAGE_KEY) === 'google')) {
         setCurrentUser(null);
         setCurrentProvider(null);
        if (typeof window !== 'undefined') localStorage.removeItem(AUTH_PROVIDER_STORAGE_KEY);
@@ -342,8 +343,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
 
     const { data: { subscription: supabaseAuthSubscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      setLoading(true); 
-      if (!isGuest) { 
+      setLoading(true);
+      if (!isGuest) {
         const supabaseUser = session?.user;
         if (supabaseUser) {
           const baseAppUser = mapSupabaseUserToAppUser(supabaseUser);
@@ -363,7 +364,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setCurrentUser(finalAppUser);
           setCurrentProvider('supabase');
           if (typeof window !== 'undefined') localStorage.setItem(AUTH_PROVIDER_STORAGE_KEY, 'supabase');
-          await initializeFirestoreUserData(finalAppUser); 
+          await initializeFirestoreUserData(finalAppUser);
         } else if (typeof window !== 'undefined' && localStorage.getItem(AUTH_PROVIDER_STORAGE_KEY) === 'supabase') {
           setCurrentUser(null);
           setCurrentProvider(null);
@@ -372,17 +373,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       setLoading(false);
     });
-    
+
     const persistedProvider = typeof window !== 'undefined' ? localStorage.getItem(AUTH_PROVIDER_STORAGE_KEY) as AuthProviderType | 'google' | null : null;
-    if (!persistedProvider && !storedGuestMode) { 
-        setLoading(false); 
+    if (!persistedProvider && !storedGuestMode) {
+        setLoading(false);
     }
 
     return () => {
       unsubscribeFirebase();
       supabaseAuthSubscription?.unsubscribe();
     };
-  }, [isGuest]); 
+  }, [isGuest]);
 
   const commonLoginSuccess = async (appUser: AppUser, provider: AuthProviderType | 'google') => {
     setCurrentUser(appUser);
@@ -392,19 +393,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         localStorage.setItem(AUTH_PROVIDER_STORAGE_KEY, provider);
         localStorage.removeItem(GUEST_MODE_STORAGE_KEY);
     }
-    await initializeFirestoreUserData(appUser); 
+    await initializeFirestoreUserData(appUser);
     router.push('/');
   };
 
   const commonSignupSuccess = async (appUser: AppUser, provider: AuthProviderType | 'google') => {
-    setCurrentUser(appUser); 
+    setCurrentUser(appUser);
     setCurrentProvider(provider);
     setIsGuest(false);
     if (typeof window !== 'undefined') {
         localStorage.setItem(AUTH_PROVIDER_STORAGE_KEY, provider);
         localStorage.removeItem(GUEST_MODE_STORAGE_KEY);
     }
-    await initializeFirestoreUserData(appUser); 
+    await initializeFirestoreUserData(appUser);
     router.push('/');
   };
 
@@ -415,19 +416,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const userCredential = await createUserWithFirebase(firebaseAuth, email, password);
       const displayName = email.split('@')[0];
       await updateFirebaseProfile(userCredential.user, { displayName });
-      
+
       const appUser = mapFirebaseUserToAppUser(userCredential.user);
-      appUser.displayName = displayName; 
-      
+      appUser.displayName = displayName;
+
       toast({ title: 'Firebase Signup Successful', description: 'Welcome aboard!' });
       await commonSignupSuccess(appUser, 'firebase');
       return appUser;
     } catch (error) {
       const authError = error as FirebaseAuthError;
       if (authError.code === 'auth/email-already-in-use') {
-        toast({ 
-          title: 'Firebase Signup Failed', 
-          description: 'This email address is already in use. Please log in or use a different email.', 
+        toast({
+          title: 'Firebase Signup Failed',
+          description: 'This email address is already in use. Please log in or use a different email.',
           variant: 'destructive',
           duration: 7000,
         });
@@ -493,7 +494,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         password,
         options: {
           data: {
-            displayName: email.split('@')[0] 
+            displayName: email.split('@')[0]
           }
         }
       });
@@ -502,7 +503,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       const appUser = mapSupabaseUserToAppUser(data.user);
       toast({ title: 'Supabase Signup Successful', description: 'Please check your email to confirm registration!' });
-      await commonSignupSuccess(appUser, 'supabase'); 
+      await commonSignupSuccess(appUser, 'supabase');
       return appUser;
     } catch (error) {
       const authError = error as SupabaseAuthError;
@@ -519,7 +520,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
       if (!data.user) throw new Error('Supabase login did not return a user.');
-      
+
       const appUser = mapSupabaseUserToAppUser(data.user);
       toast({ title: 'Supabase Login Successful', description: 'Welcome back!' });
       await commonLoginSuccess(appUser, 'supabase');
@@ -535,7 +536,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = async () => {
     setLoading(true);
-    const providerToLogout = currentProvider; 
+    const providerToLogout = currentProvider;
     try {
       if (providerToLogout === 'firebase' || providerToLogout === 'google') {
         await signOutFirebase(firebaseAuth);
@@ -566,7 +567,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsGuest(true);
     if (typeof window !== 'undefined') {
         localStorage.setItem(GUEST_MODE_STORAGE_KEY, 'true');
-        localStorage.removeItem(AUTH_PROVIDER_STORAGE_KEY); 
+        localStorage.removeItem(AUTH_PROVIDER_STORAGE_KEY);
     }
     router.push('/');
   }, [router]);
@@ -576,7 +577,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (typeof window !== 'undefined') {
         localStorage.removeItem(GUEST_MODE_STORAGE_KEY);
     }
-    router.push('/login'); 
+    router.push('/login');
   }, [router]);
 
   // --- Co-working Feature Functions ---
@@ -603,11 +604,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             organizationMemberships: arrayUnion(newOrgRef.id),
             defaultOrganizationId: newOrgRef.id,
         });
-        
+
         const newOrgData: Organization = {
             id: newOrgRef.id, name, ownerId: currentUser.id, memberIds: [currentUser.id], teamIds: [], createdAt: new Date().toISOString(), description, inviteCode
         };
-        
+
         setCurrentUser(prevUser => prevUser ? ({
             ...prevUser,
             organizationMemberships: [...(prevUser.organizationMemberships || []), newOrgRef.id],
@@ -641,7 +642,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             description: description || "",
             organizationId,
             memberIds: [currentUser.id],
-            adminIds: [currentUser.id], 
+            adminIds: [currentUser.id],
             createdAt: serverTimestamp(),
         });
 
@@ -654,11 +655,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await updateDoc(userDocRef, {
             teamMemberships: arrayUnion(newTeamRef.id),
         });
-        
+
         const newTeamData: Team = {
             id: newTeamRef.id, name, organizationId, memberIds: [currentUser.id], adminIds: [currentUser.id], createdAt: new Date().toISOString(), description
         };
-        
+
         setCurrentUser(prevUser => prevUser ? ({
             ...prevUser,
             teamMemberships: [...(prevUser.teamMemberships || []), newTeamRef.id],
@@ -681,12 +682,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const batch = writeBatch(db);
         const teamDocRef = doc(db, "teams", teamId);
         batch.update(teamDocRef, { memberIds: arrayUnion(currentUser.id) });
-        
+
         const userDocRef = doc(db, "users", currentUser.id);
         batch.update(userDocRef, { teamMemberships: arrayUnion(teamId) });
-        
+
         await batch.commit();
-        
+
         setCurrentUser(prevUser => prevUser ? ({
             ...prevUser,
             teamMemberships: [...new Set([...(prevUser.teamMemberships || []), teamId])],
@@ -709,8 +710,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const querySnapshot = await getDocs(orgsQuery);
         return querySnapshot.docs.map(docSnap => {
              const data = docSnap.data();
-             return { 
-                id: docSnap.id, 
+             return {
+                id: docSnap.id,
                 name: data.name,
                 ownerId: data.ownerId,
                 memberIds: data.memberIds,
@@ -743,7 +744,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return querySnapshot.docs
             .map(docSnap => {
                 const data = docSnap.data();
-                return { 
+                return {
                     id: docSnap.id,
                     name: data.name,
                     organizationId: data.organizationId,
@@ -760,7 +761,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return [];
     }
   };
-  
+
   const setCurrentOrganization = async (organizationId: string | null): Promise<void> => {
     if (!currentUser) return;
     try {
@@ -811,11 +812,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       batch.update(orgDocRef, { memberIds: arrayUnion(currentUser.id) });
 
       const userDocRef = doc(db, "users", currentUser.id);
-      batch.update(userDocRef, { 
+      batch.update(userDocRef, {
           organizationMemberships: arrayUnion(organization.id),
           defaultOrganizationId: organization.id // Automatically set as default upon joining
       });
-      
+
       await batch.commit();
 
       setCurrentUser(prevUser => prevUser ? ({
@@ -855,7 +856,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // toast({ title: "Organization Needed", description: "Select a default organization to chat with its members.", variant: "default" });
         usersQuery = query(usersCollectionRef, orderBy('displayName'), limit(50)); // Example: limit to 50 users if no org
     }
-    
+
     try {
         const querySnapshot = await getDocs(usersQuery);
         const users: AppUser[] = [];
@@ -917,4 +918,3 @@ export function useAuth() {
   }
   return context;
 }
-
