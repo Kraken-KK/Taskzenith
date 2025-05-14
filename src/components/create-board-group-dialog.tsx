@@ -1,3 +1,4 @@
+
 // src/components/create-board-group-dialog.tsx
 'use client';
 
@@ -38,7 +39,7 @@ export function CreateBoardGroupDialog({ open, onOpenChange, children }: CreateB
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       {children && <DialogTrigger asChild>{children}</DialogTrigger>}
-      <DialogContent className="sm:max-w-[425px]">
+      <DialogContent className="w-[90vw] max-w-lg">
         <DialogHeader>
           <DialogTitle>Create New Board Group</DialogTitle>
           <DialogDescription>
@@ -68,3 +69,4 @@ export function CreateBoardGroupDialog({ open, onOpenChange, children }: CreateB
     </Dialog>
   );
 }
+

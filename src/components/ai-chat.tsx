@@ -1,3 +1,4 @@
+
 'use client';
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
@@ -87,10 +88,10 @@ export function AiChat() {
       const userDocRef = doc(db, 'users', currentUser.id);
       const historyForFirestore: MessageHistoryItem[] = currentDisplayMessages
         .filter(msg => msg.sender === 'user' || msg.sender === 'ai') 
-        .slice(-MAX_HISTORY_LENGTH * 2) // Keep a bit more history in DB if needed for other purposes, or just MAX_HISTORY_LENGTH
+        .slice(-MAX_HISTORY_LENGTH * 2) 
         .map(msg => ({
           role: msg.sender === 'user' ? 'user' : 'model',
-          parts: [{ text: typeof msg.text === 'string' ? msg.text : 'Structured AI Message' }] // Ensure text is string
+          parts: [{ text: typeof msg.text === 'string' ? msg.text : 'Structured AI Message' }] 
         }));
       
       try {
@@ -114,7 +115,6 @@ export function AiChat() {
   useEffect(() => {
     const scrollViewport = scrollAreaRef.current?.querySelector('div[data-radix-scroll-area-viewport]');
     if (scrollViewport) {
-      // Defer scroll to ensure DOM is updated
       setTimeout(() => {
         scrollViewport.scrollTo({ top: scrollViewport.scrollHeight, behavior: 'smooth' });
       }, 0);
@@ -225,18 +225,15 @@ export function AiChat() {
       timestamp: Date.now(),
     };
     
-    // Construct historyForAI based on current messages + new userMessage
-    // This ensures the AI gets the latest state before its "thinking" message is added.
     const currentMessagesWithUser = [...messages, userMessage];
     const historyForAI: MessageHistoryItem[] = currentMessagesWithUser
-      .filter(msg => msg.sender === 'user' || msg.sender === 'ai') // Filter out system messages
-      .slice(-MAX_HISTORY_LENGTH) // Take last N messages
+      .filter(msg => msg.sender === 'user' || msg.sender === 'ai') 
+      .slice(-MAX_HISTORY_LENGTH) 
       .map(msg => ({
         role: msg.sender === 'user' ? 'user' : 'model',
-        parts: [{ text: typeof msg.text === 'string' ? msg.text : 'Structured message content.' }] // Ensure text is string
+        parts: [{ text: typeof msg.text === 'string' ? msg.text : 'Structured message content.' }] 
       }));
 
-    // Stage 1: Add user message to UI
     setMessages(prev => [...prev, userMessage]);
     setInputValue('');
     setIsLoading(true);
@@ -253,13 +250,10 @@ export function AiChat() {
         ),
         timestamp: Date.now(),
     }
-    // Stage 2: Add thinking message to UI
     setMessages(prev => [...prev, thinkingMessage]);
     
     const aiInput: ChatInput = { 
       query: trimmedInput, 
-      // History for AI should not include the current query itself, as it's passed in `query` field.
-      // So if historyForAI was built including userMessage, slice it off.
       history: historyForAI.length > 0 ? historyForAI.slice(0, -1) : [], 
       activeBoardContext: prepareBoardContext(),
       userPreferences: prepareUserPreferences(),
@@ -269,33 +263,32 @@ export function AiChat() {
       const aiResponse: ChatOutput = await chatWithAI(aiInput);
 
       const aiResponseMessage: DisplayMessage = {
-        id: thinkingMessageId, // Use the thinking message's ID to replace it
+        id: thinkingMessageId,
         sender: 'ai',
         text: aiResponse.response,
         timestamp: Date.now(),
       };
       
-      // Stage 3: Replace thinking message with AI response
       setMessages(prevMessages => {
         const updatedWithAIResp = prevMessages.map(msg => 
           msg.id === thinkingMessageId ? aiResponseMessage : msg
         );
-        saveChatHistory(updatedWithAIResp); // Save history with the final set of messages
+        saveChatHistory(updatedWithAIResp); 
         return updatedWithAIResp;
       });
 
       if (aiResponse.taskAction) {
-        handleTaskAction(aiResponse.taskAction); // This might add more system messages
+        handleTaskAction(aiResponse.taskAction);
       }
       if (aiResponse.preferenceUpdate) {
-        handlePreferenceUpdate(aiResponse.preferenceUpdate); // This might add more system messages
+        handlePreferenceUpdate(aiResponse.preferenceUpdate);
       }
 
     } catch (error) {
       console.error('Error fetching AI response:', error);
       const errorMessageText = error instanceof Error ? error.message : 'An unknown error occurred.';
       const errorDisplayMessage: DisplayMessage = {
-        id: thinkingMessageId, // Use the thinking message's ID to replace it
+        id: thinkingMessageId, 
         sender: 'ai',
         text: (
             <span className="text-destructive">
@@ -304,7 +297,6 @@ export function AiChat() {
         ),
         timestamp: Date.now(),
       };
-      // Stage 3 (Error): Replace thinking message with error message
       setMessages(prevMessages => {
         const updatedWithError = prevMessages.map(msg => 
           msg.id === thinkingMessageId ? errorDisplayMessage : msg
@@ -379,7 +371,7 @@ export function AiChat() {
                     {typeof message.text === 'string' ? (
                         <p className="whitespace-pre-wrap leading-relaxed break-words">{message.text}</p>
                     ) : (
-                        message.text // This handles JSX like the "thinking" message
+                        message.text 
                     )}
                     </div>
                 )}

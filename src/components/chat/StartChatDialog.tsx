@@ -1,3 +1,4 @@
+
 // src/components/chat/StartChatDialog.tsx
 'use client';
 
@@ -44,7 +45,7 @@ export function StartChatDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="w-[90vw] max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <UserPlus className="h-6 w-6 text-primary" /> Start New Chat
@@ -103,3 +104,4 @@ export function StartChatDialog({
     </Dialog>
   );
 }
+

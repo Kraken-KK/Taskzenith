@@ -1,4 +1,5 @@
 
+
 'use client';
 
 import React, { useState, useEffect } from 'react';
@@ -73,7 +74,7 @@ export function BoardThemeCustomizer({ board, open, onOpenChange, children }: Bo
     } else {
       setCurrentTheme({});
     }
-  }, [board, open]); // Reload theme when dialog opens or board changes
+  }, [board, open]); 
 
   const handleColorChange = (key: keyof BoardTheme, value: string) => {
     setCurrentTheme(prevTheme => ({ ...prevTheme, [key]: value }));
@@ -82,7 +83,7 @@ export function BoardThemeCustomizer({ board, open, onOpenChange, children }: Bo
   const handleClearColor = (key: keyof BoardTheme) => {
     setCurrentTheme(prevTheme => {
       const newTheme = { ...prevTheme };
-      delete newTheme[key]; // Remove the key to signify using default
+      delete newTheme[key]; 
       return newTheme;
     });
   };
@@ -97,8 +98,8 @@ export function BoardThemeCustomizer({ board, open, onOpenChange, children }: Bo
 
   const handleSelectPredefinedTheme = (theme: BoardTheme) => {
     if (board) {
-      setCurrentTheme(theme); // Update local state for immediate preview in pickers
-      updateBoardTheme(board.id, theme); // Update context
+      setCurrentTheme(theme); 
+      updateBoardTheme(board.id, theme); 
       toast({ title: "Predefined Theme Applied", description: `Theme applied to "${board.name}".` });
     }
   };
@@ -117,7 +118,7 @@ export function BoardThemeCustomizer({ board, open, onOpenChange, children }: Bo
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       {children && <DialogTrigger asChild>{children}</DialogTrigger>}
-      <DialogContent className="sm:max-w-2xl">
+      <DialogContent className="w-[95vw] max-w-2xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Paintbrush className="h-6 w-6 text-primary" /> Customize Theme: {board.name}
@@ -127,9 +128,8 @@ export function BoardThemeCustomizer({ board, open, onOpenChange, children }: Bo
           </DialogDescription>
         </DialogHeader>
 
-        <ScrollArea className="max-h-[70vh] p-1">
+        <ScrollArea className="max-h-[60vh] p-1">
           <div className="py-4 space-y-6">
-            {/* Predefined Themes Section */}
             <section>
               <h3 className="text-lg font-semibold mb-3 text-foreground">Predefined Themes</h3>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
@@ -158,7 +158,6 @@ export function BoardThemeCustomizer({ board, open, onOpenChange, children }: Bo
 
             <hr className="my-6 border-border" />
 
-            {/* Custom Colors Section */}
             <section>
               <div className="flex justify-between items-center mb-3">
                 <h3 className="text-lg font-semibold text-foreground">Custom Colors</h3>
@@ -213,3 +212,4 @@ export function BoardThemeCustomizer({ board, open, onOpenChange, children }: Bo
     </Dialog>
   );
 }
+

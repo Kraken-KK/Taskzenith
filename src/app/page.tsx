@@ -1,7 +1,7 @@
 
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react'; // Added useCallback
+import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import {
@@ -21,8 +21,8 @@ import { AiChat } from "@/components/ai-chat";
 import { SettingsView } from '@/components/settings-view';
 import { PrioritizeTasksView } from '@/components/prioritize-tasks-view';
 import { SmartTaskCreationView } from '@/components/smart-task-creation-view';
-import { ChatLayout } from '@/components/chat/ChatLayout'; // Import ChatLayout
-import { Bot, CheckSquare, ListTodo, Settings, Star, Menu, FolderKanban, PlusCircle, Edit3, Trash2, Palette, LogOut, Database, Zap, User, Chrome, FolderPlus, FolderSymlink, Folders, Users, Building, Briefcase, MessageSquare, LogIn } from "lucide-react"; // Added MessageSquare, Users, Building for org/team
+import { ChatLayout } from '@/components/chat/ChatLayout';
+import { Bot, CheckSquare, ListTodo, Settings, Star, Menu, FolderKanban, PlusCircle, Edit3, Trash2, Palette, LogOut, Database, Zap, User, Chrome, FolderPlus, FolderSymlink, Folders, Users, Building, Briefcase, MessageSquare, LogIn, MoreVertical } from "lucide-react";
 import { useSidebar } from '@/components/ui/sidebar';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -65,7 +65,7 @@ import { useToast } from '@/hooks/use-toast';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 
 
-type ActiveView = 'board' | 'ai-assistant' | 'prioritize' | 'smart-create' | 'settings' | 'organizations' | 'teams' | 'chat'; // Added 'chat'
+type ActiveView = 'board' | 'ai-assistant' | 'prioritize' | 'smart-create' | 'settings' | 'organizations' | 'teams' | 'chat';
 
 export default function Home() {
   const { 
@@ -74,7 +74,7 @@ export default function Home() {
   } = useAuth();
   const router = useRouter();
   const [activeView, setActiveView] = useState<ActiveView>('board');
-  const { isMobile } = useSidebar();
+  const { isMobile, setOpenMobile } = useSidebar(); // Added setOpenMobile
   const { 
     boards, activeBoardId, setActiveBoardId, getActiveBoard, deleteBoard,
     boardGroups, addBoardGroup, deleteBoardGroup, updateBoardGroupName, addBoardToGroup, removeBoardFromGroup, updateBoardGroupId
@@ -91,7 +91,6 @@ export default function Home() {
   const [groupToRename, setGroupToRename] = useState<BoardGroup | undefined>(undefined);
   const [targetGroupIdForNewBoard, setTargetGroupIdForNewBoard] = useState<string | null | undefined>(undefined);
 
-  // State for new co-working features
   const [isCreateOrgDialogOpen, setIsCreateOrgDialogOpen] = useState(false);
   const [isJoinOrgDialogOpen, setIsJoinOrgDialogOpen] = useState(false);
   const [isCreateTeamDialogOpen, setIsCreateTeamDialogOpen] = useState(false);
@@ -120,8 +119,7 @@ export default function Home() {
             const teams = await getUserTeams(currentUser.defaultOrganizationId);
             setUserTeams(teams);
         } else if (orgs.length > 0) {
-            // const teams = await getUserTeams(orgs[0].id); // Fallback for display
-            setUserTeams([]); // If no default org, don't load teams for an arbitrary org
+            setUserTeams([]);
         } else {
             setUserTeams([]);
         }
@@ -132,13 +130,12 @@ export default function Home() {
   }, [currentUser, isGuest, getUserOrganizations, getUserTeams]);
 
 
-  // Fetch user's organizations and teams
   useEffect(() => {
     fetchUserOrgsAndTeams();
-  }, [fetchUserOrgsAndTeams, currentUser?.defaultOrganizationId]); // Added defaultOrganizationId as dependency
+  }, [fetchUserOrgsAndTeams, currentUser?.defaultOrganizationId]);
 
 
-  if (authLoading || (!currentUser && !isGuest && activeView !== 'chat')) {  // Allow chat view for guests too, maybe? For now, restricted.
+  if (authLoading || (!currentUser && !isGuest && activeView !== 'chat')) {
     return (
       <div className="flex h-screen w-screen items-center justify-center bg-background">
         <svg className="animate-spin h-12 w-12 text-primary" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -160,7 +157,7 @@ export default function Home() {
       case 'settings': return 'Settings';
       case 'organizations': return 'My Organizations';
       case 'teams': return currentOrg ? `Teams in ${currentOrg.name}` : 'My Teams';
-      case 'chat': return 'Team Chat'; // New header for chat
+      case 'chat': return 'Team Chat';
       default: return 'TaskZenith';
     }
   };
@@ -240,8 +237,15 @@ export default function Home() {
   
   const handleSetCurrentOrg = async (orgId: string | null) => {
     await setCurrentOrganization(orgId);
-    // Refetch teams will be handled by useEffect hook watching currentUser.defaultOrganizationId
   };
+
+  const handleViewChange = (newView: ActiveView) => {
+    setActiveView(newView);
+    if (isMobile && setOpenMobile) {
+        setOpenMobile(false);
+    }
+  };
+
 
   return (
     <div className="flex h-screen bg-background text-foreground animate-fadeIn">
@@ -267,7 +271,6 @@ export default function Home() {
         </SidebarHeader>
         <SidebarContent className="flex-1 overflow-y-auto p-2">
           <SidebarMenu>
-            {/* Organizations Section */}
             {!isGuest && currentUser && (
               <SidebarMenuItem>
                 <DropdownMenu>
@@ -290,10 +293,10 @@ export default function Home() {
                       </DropdownMenuItem>
                     ))}
                      <DropdownMenuSeparator />
-                     <DropdownMenuItem onClick={() => setIsCreateOrgDialogOpen(true)}>
+                     <DropdownMenuItem onClick={() => { setIsCreateOrgDialogOpen(true); if (isMobile && setOpenMobile) setOpenMobile(false);}}>
                        <PlusCircle className="mr-2 h-4 w-4" /> Create Organization
                      </DropdownMenuItem>
-                     <DropdownMenuItem onClick={() => setIsJoinOrgDialogOpen(true)}>
+                     <DropdownMenuItem onClick={() => { setIsJoinOrgDialogOpen(true); if (isMobile && setOpenMobile) setOpenMobile(false); }}>
                        <LogIn className="mr-2 h-4 w-4" /> Join Organization
                      </DropdownMenuItem>
                      {currentUser.defaultOrganizationId && (
@@ -306,7 +309,6 @@ export default function Home() {
               </SidebarMenuItem>
             )}
 
-            {/* Teams Section (contextual to selected organization) */}
             {!isGuest && currentUser && currentUser.defaultOrganizationId && (
               <SidebarMenuItem>
                 <DropdownMenu>
@@ -322,12 +324,12 @@ export default function Home() {
                     <DropdownMenuSeparator />
                     {userTeams.length === 0 && <DropdownMenuItem disabled>No teams in this org yet.</DropdownMenuItem>}
                     {userTeams.map(team => (
-                      <DropdownMenuItem key={team.id} /* onClick={() => setActiveTeam(team.id) - for future use} */ >
+                      <DropdownMenuItem key={team.id} >
                         {team.name}
                       </DropdownMenuItem>
                     ))}
                     <DropdownMenuSeparator />
-                    <DropdownMenuItem onClick={() => currentUser.defaultOrganizationId && handleOpenCreateTeamDialog(currentUser.defaultOrganizationId)}>
+                    <DropdownMenuItem onClick={() => { if(currentUser.defaultOrganizationId) handleOpenCreateTeamDialog(currentUser.defaultOrganizationId); if (isMobile && setOpenMobile) setOpenMobile(false); }}>
                       <PlusCircle className="mr-2 h-4 w-4" /> Create New Team
                     </DropdownMenuItem>
                   </DropdownMenuContent>
@@ -336,8 +338,6 @@ export default function Home() {
             )}
             <SidebarSeparator />
 
-
-            {/* Board Groups Section */}
             <SidebarMenuItem>
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
@@ -367,17 +367,17 @@ export default function Home() {
                                         {group.boardIds.map(boardId => {
                                             const board = boards.find(b => b.id === boardId);
                                             return board ? (
-                                                <DropdownMenuItem key={boardId} onClick={() => setActiveBoardId(boardId)} className={cn(boardId === activeBoardId && "bg-accent text-accent-foreground")}>
+                                                <DropdownMenuItem key={boardId} onClick={() => { setActiveBoardId(boardId); if(isMobile && setOpenMobile) setOpenMobile(false); }} className={cn(boardId === activeBoardId && "bg-accent text-accent-foreground")}>
                                                     {board.name}
                                                 </DropdownMenuItem>
                                             ) : null;
                                         })}
                                         <DropdownMenuSeparator />
-                                        <DropdownMenuItem onClick={() => openCreateBoardDialog(group.id)}>
+                                        <DropdownMenuItem onClick={() => { openCreateBoardDialog(group.id); if (isMobile && setOpenMobile) setOpenMobile(false); }}>
                                             <PlusCircle className="mr-2 h-4 w-4" /> Add New Board to Group
                                         </DropdownMenuItem>
                                         <DropdownMenuSeparator />
-                                        <DropdownMenuItem onClick={() => handleRenameGroup(group)}>
+                                        <DropdownMenuItem onClick={() => { handleRenameGroup(group); if (isMobile && setOpenMobile) setOpenMobile(false); }}>
                                             <Edit3 className="mr-2 h-4 w-4" /> Rename Group
                                         </DropdownMenuItem>
                                         <AlertDialogTrigger asChild>
@@ -408,7 +408,7 @@ export default function Home() {
                            </AlertDialog>
                         ))}
                         <DropdownMenuSeparator />
-                        <DropdownMenuItem onClick={() => setIsCreateGroupDialogOpen(true)}>
+                        <DropdownMenuItem onClick={() => { setIsCreateGroupDialogOpen(true); if (isMobile && setOpenMobile) setOpenMobile(false);}}>
                             <FolderPlus className="mr-2 h-4 w-4" /> Create New Group
                         </DropdownMenuItem>
                     </DropdownMenuContent>
@@ -417,7 +417,6 @@ export default function Home() {
 
             <SidebarSeparator />
 
-            {/* Individual Boards Section (Ungrouped and All) */}
             <SidebarMenuItem>
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
@@ -439,7 +438,7 @@ export default function Home() {
                             <DropdownMenuSub>
                                 <DropdownMenuSubTrigger
                                     className={cn("justify-between", board.id === activeBoardId && "bg-accent text-accent-foreground")}
-                                    onClick={() => setActiveBoardId(board.id)}
+                                    onClick={() => { setActiveBoardId(board.id); handleViewChange('board');}}
                                 >
                                     <span className="flex items-center">
                                         {board.name}
@@ -450,10 +449,10 @@ export default function Home() {
                                 </DropdownMenuSubTrigger>
                                 <DropdownMenuPortal>
                                     <DropdownMenuSubContent className="w-52">
-                                        <DropdownMenuItem onClick={() => handleRenameBoard(board)}>
+                                        <DropdownMenuItem onClick={() => { handleRenameBoard(board); if (isMobile && setOpenMobile) setOpenMobile(false);}}>
                                             <Edit3 className="mr-2 h-4 w-4" /> Rename Board
                                         </DropdownMenuItem>
-                                        <DropdownMenuItem onClick={() => handleCustomizeTheme(board)}>
+                                        <DropdownMenuItem onClick={() => { handleCustomizeTheme(board); if (isMobile && setOpenMobile) setOpenMobile(false); }}>
                                             <Palette className="mr-2 h-4 w-4" /> Customize Theme
                                         </DropdownMenuItem>
                                         <DropdownMenuSub>
@@ -482,7 +481,7 @@ export default function Home() {
                                                             </DropdownMenuRadioItem>
                                                         ))}
                                                          <DropdownMenuSeparator />
-                                                        <DropdownMenuItem onClick={() => setIsCreateGroupDialogOpen(true)}>
+                                                        <DropdownMenuItem onClick={() => { setIsCreateGroupDialogOpen(true); if (isMobile && setOpenMobile) setOpenMobile(false); }}>
                                                            <FolderPlus className="mr-2 h-4 w-4" /> Create New Group...
                                                         </DropdownMenuItem>
                                                     </DropdownMenuRadioGroup>
@@ -518,7 +517,7 @@ export default function Home() {
                            </AlertDialog>
                         ))}
                         <DropdownMenuSeparator />
-                        <DropdownMenuItem onClick={() => openCreateBoardDialog()}>
+                        <DropdownMenuItem onClick={() => {openCreateBoardDialog(); if(isMobile && setOpenMobile) setOpenMobile(false);}}>
                             <PlusCircle className="mr-2 h-4 w-4" /> Create New Board
                         </DropdownMenuItem>
                     </DropdownMenuContent>
@@ -535,7 +534,7 @@ export default function Home() {
                          toast({title: "No Board Selected", description: "Please create or select a board first.", variant: "destructive"});
                          return;
                     }
-                    setActiveView('board');
+                    handleViewChange('board');
                   }}
                   className="hover:bg-sidebar-accent/80 dark:hover:bg-sidebar-accent/50"
                   disabled={authLoading && !currentUser && !isGuest}
@@ -548,7 +547,7 @@ export default function Home() {
                <SidebarMenuButton
                   tooltip="AI Assistant"
                   isActive={activeView === 'ai-assistant'}
-                  onClick={() => setActiveView('ai-assistant')}
+                  onClick={() => handleViewChange('ai-assistant')}
                   className="hover:bg-sidebar-accent/80 dark:hover:bg-sidebar-accent/50"
                   disabled={authLoading && !currentUser && !isGuest}
                 >
@@ -560,9 +559,9 @@ export default function Home() {
                <SidebarMenuButton
                   tooltip="Team Chat"
                   isActive={activeView === 'chat'}
-                  onClick={() => setActiveView('chat')}
+                  onClick={() => handleViewChange('chat')}
                   className="hover:bg-sidebar-accent/80 dark:hover:bg-sidebar-accent/50"
-                  disabled={authLoading && !currentUser && !isGuest && !currentUser?.defaultOrganizationId} // Disable if not logged in, or no org
+                  disabled={authLoading && !currentUser && !isGuest && !currentUser?.defaultOrganizationId}
                 >
                   <MessageSquare />
                   Chat
@@ -572,7 +571,7 @@ export default function Home() {
                <SidebarMenuButton
                   tooltip="Prioritize Tasks"
                   isActive={activeView === 'prioritize'}
-                  onClick={() => setActiveView('prioritize')}
+                  onClick={() => handleViewChange('prioritize')}
                   className="hover:bg-sidebar-accent/80 dark:hover:bg-sidebar-accent/50"
                   disabled={authLoading && !currentUser && !isGuest}
                 >
@@ -584,7 +583,7 @@ export default function Home() {
                <SidebarMenuButton
                   tooltip="Smart Task Creation"
                   isActive={activeView === 'smart-create'}
-                  onClick={() => setActiveView('smart-create')}
+                  onClick={() => handleViewChange('smart-create')}
                   className="hover:bg-sidebar-accent/80 dark:hover:bg-sidebar-accent/50"
                   disabled={authLoading && !currentUser && !isGuest}
                 >
@@ -600,7 +599,7 @@ export default function Home() {
                <SidebarMenuButton
                   tooltip="Settings"
                   isActive={activeView === 'settings'}
-                  onClick={() => setActiveView('settings')}
+                  onClick={() => handleViewChange('settings')}
                   className="hover:bg-sidebar-accent/80 dark:hover:bg-sidebar-accent/50"
                   disabled={authLoading && !currentUser && !isGuest}
                 >
@@ -611,7 +610,10 @@ export default function Home() {
               <SidebarMenuItem>
                 <SidebarMenuButton
                   tooltip={isGuest ? "Exit Guest Mode & Login" : "Logout"}
-                  onClick={isGuest ? exitGuestMode : logout}
+                  onClick={() => {
+                     isGuest ? exitGuestMode() : logout();
+                     if (isMobile && setOpenMobile) setOpenMobile(false);
+                  }}
                   className="hover:bg-destructive/20 dark:hover:bg-destructive/30 text-destructive dark:text-red-400"
                   disabled={authLoading}
                 >
@@ -656,11 +658,27 @@ export default function Home() {
         <header className="flex items-center justify-between p-4 border-b shadow-sm bg-card/50 backdrop-blur-sm">
            <SidebarTrigger />
            <h1 className="text-xl font-semibold">{getHeaderText()}</h1>
-           <div className="w-7 h-7"> {/* Placeholder for potential right-side header actions */} </div>
+           <div className={cn("w-7 h-7", isMobile && "md:hidden")}> {/* Placeholder for potential right-side header actions, like mobile menu for board actions */}
+             {isMobile && activeView === 'board' && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="icon">
+                      <MoreVertical className="h-5 w-5" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={() => openCreateBoardDialog()}>
+                      <PlusCircle className="mr-2 h-4 w-4" /> Create Board
+                    </DropdownMenuItem>
+                    {/* Add other board-level actions here for mobile */}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+             )}
+           </div>
          </header>
-        <main className="flex-1 overflow-y-auto p-4 bg-secondary/20 dark:bg-neutral-900/50">
+        <main className="flex-1 overflow-y-auto p-1 sm:p-4 bg-secondary/20 dark:bg-neutral-900/50">
           {activeView === 'board' && (activeBoardId ? <KanbanBoard /> : 
-            <div className="flex flex-col items-center justify-center h-full text-center">
+            <div className="flex flex-col items-center justify-center h-full text-center p-4">
                 <FolderKanban className="w-24 h-24 text-muted-foreground mb-4" />
                 <h2 className="text-2xl font-semibold mb-2">No Board Selected</h2>
                 <p className="text-muted-foreground mb-4">Please create or select a board from the sidebar to get started.</p>
@@ -674,7 +692,6 @@ export default function Home() {
           {activeView === 'prioritize' && <PrioritizeTasksView />}
           {activeView === 'smart-create' && <SmartTaskCreationView />}
           {activeView === 'settings' && <SettingsView />}
-          {/* Placeholder for Organizations View */}
           {activeView === 'organizations' && !isGuest && currentUser &&(
             <div className="p-4">
               <h2 className="text-2xl font-semibold mb-4">My Organizations</h2>
@@ -701,7 +718,6 @@ export default function Home() {
                </div>
             </div>
           )}
-          {/* Placeholder for Teams View */}
           {activeView === 'teams' && !isGuest && currentUser && currentUser.defaultOrganizationId && (
             <div className="p-4">
               <h2 className="text-2xl font-semibold mb-4">Teams in {userOrganizations.find(o => o.id === currentUser?.defaultOrganizationId)?.name}</h2>
@@ -712,7 +728,6 @@ export default function Home() {
                   {userTeams.map(team => (
                     <li key={team.id} className="p-3 border rounded-md shadow-sm">
                       {team.name}
-                      {/* Add join/view team button here later */}
                     </li>
                   ))}
                 </ul>
@@ -733,7 +748,6 @@ export default function Home() {
       <BoardThemeCustomizer board={boardToCustomize} open={isThemeCustomizerOpen} onOpenChange={setIsThemeCustomizerOpen} />
       <CreateBoardGroupDialog open={isCreateGroupDialogOpen} onOpenChange={setIsCreateGroupDialogOpen} />
       <RenameBoardGroupDialog group={groupToRename} open={isRenameGroupDialogOpen} onOpenChange={setIsRenameGroupDialogOpen} />
-      {/* Co-working Dialogs */}
       <CreateOrganizationDialog 
         open={isCreateOrgDialogOpen} 
         onOpenChange={(isOpen) => {

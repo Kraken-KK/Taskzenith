@@ -1,3 +1,4 @@
+
 // src/components/join-organization-dialog.tsx
 'use client';
 
@@ -15,14 +16,14 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useAuth } from '@/contexts/AuthContext';
-import { LogIn, PlusCircle } from 'lucide-react'; // Changed Briefcase to LogIn for joining
+import { LogIn, PlusCircle } from 'lucide-react'; 
 import { useToast } from '@/hooks/use-toast';
 
 interface JoinOrganizationDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   children?: React.ReactNode;
-  onOrgJoined?: () => void; // Callback to refresh lists in parent
+  onOrgJoined?: () => void; 
 }
 
 export function JoinOrganizationDialog({ open, onOpenChange, children, onOrgJoined }: JoinOrganizationDialogProps) {
@@ -42,9 +43,8 @@ export function JoinOrganizationDialog({ open, onOpenChange, children, onOrgJoin
     if (joinedOrg) {
       setInviteCode('');
       onOpenChange(false); 
-      onOrgJoined?.(); // Call callback to refresh org list in parent
+      onOrgJoined?.(); 
     }
-    // Error/Success toasts are handled within joinOrganizationByInviteCode context function
   };
 
   return (
@@ -55,7 +55,7 @@ export function JoinOrganizationDialog({ open, onOpenChange, children, onOrgJoin
         onOpenChange(isOpen);
     }}>
       {children && <DialogTrigger asChild>{children}</DialogTrigger>}
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="w-[90vw] max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <LogIn className="h-6 w-6 text-primary" /> Join Organization
@@ -88,3 +88,4 @@ export function JoinOrganizationDialog({ open, onOpenChange, children, onOrgJoin
     </Dialog>
   );
 }
+

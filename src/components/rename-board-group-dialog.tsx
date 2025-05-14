@@ -1,3 +1,4 @@
+
 // src/components/rename-board-group-dialog.tsx
 'use client';
 
@@ -44,7 +45,7 @@ export function RenameBoardGroupDialog({ group, open, onOpenChange }: RenameBoar
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[425px]">
+      <DialogContent className="w-[90vw] max-w-lg">
         <DialogHeader>
           <DialogTitle>Rename Board Group</DialogTitle>
           <DialogDescription>
@@ -73,3 +74,4 @@ export function RenameBoardGroupDialog({ group, open, onOpenChange }: RenameBoar
     </Dialog>
   );
 }
+

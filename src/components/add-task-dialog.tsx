@@ -1,3 +1,4 @@
+
 'use client';
 
 import React from 'react';
@@ -86,7 +87,7 @@ export function AddTaskDialog({ open, onOpenChange, onAddTask, children }: AddTa
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       {children && <DialogTrigger asChild>{children}</DialogTrigger>}
-      <DialogContent className="sm:max-w-[425px]">
+      <DialogContent className="w-[90vw] max-w-lg">
         <DialogHeader>
           <DialogTitle>Add New Task</DialogTitle>
           <DialogDescription>
@@ -210,3 +211,4 @@ export function AddTaskDialog({ open, onOpenChange, onAddTask, children }: AddTa
     </Dialog>
   );
 }
+

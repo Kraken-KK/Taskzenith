@@ -1,3 +1,4 @@
+
 // src/components/create-organization-dialog.tsx
 'use client';
 
@@ -43,9 +44,8 @@ export function CreateOrganizationDialog({ open, onOpenChange, children }: Creat
     if (newOrg) {
       setOrgName('');
       setOrgDescription('');
-      onOpenChange(false); // This will trigger refresh in parent if onOpenChange callback is set up for it
+      onOpenChange(false); 
     }
-    // Error toasts are handled within createOrganization context function
   };
 
   return (
@@ -57,7 +57,7 @@ export function CreateOrganizationDialog({ open, onOpenChange, children }: Creat
         onOpenChange(isOpen);
     }}>
       {children && <DialogTrigger asChild>{children}</DialogTrigger>}
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="w-[90vw] max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Briefcase className="h-6 w-6 text-primary" /> Create New Organization
@@ -99,3 +99,4 @@ export function CreateOrganizationDialog({ open, onOpenChange, children }: Creat
     </Dialog>
   );
 }
+

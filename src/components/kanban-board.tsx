@@ -11,14 +11,14 @@ import { Progress } from "@/components/ui/progress";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Plus, Edit2, Trash2, Check, X, AlertTriangle, ListChecks, Filter, ArrowUpDown, Link2, MoreHorizontal, PlusCircle, CalendarDays, Tags, UserCircle, Palette, FolderKanban, Users, Building } from 'lucide-react'; // Added Users, Building
+import { Plus, Edit2, Trash2, Check, X, AlertTriangle, ListChecks, Filter, ArrowUpDown, Link2, MoreHorizontal, PlusCircle, CalendarDays, Tags, UserCircle, Palette, FolderKanban, Users, Building, MoreVertical } from 'lucide-react';
 import Confetti from 'react-confetti';
 import { useToast } from "@/hooks/use-toast";
-import type { Task, Column as ColumnType, ChecklistItem, Board, Organization, Team } from '@/types'; // Added Organization, Team
+import type { Task, Column as ColumnType, ChecklistItem, Board, Organization, Team } from '@/types';
 import { AddTaskDialog } from '@/components/add-task-dialog';
 import { useTasks } from '@/contexts/TaskContext';
 import { useSettings } from '@/contexts/SettingsContext';
-import { useAuth } from '@/contexts/AuthContext'; // Added useAuth
+import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
 import {
   AlertDialog,
@@ -47,6 +47,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip";
 import { BoardThemeCustomizer } from '@/components/board-theme-customizer';
+import { useIsMobile } from '@/hooks/use-mobile';
 
 
 type SortOption = 'priority' | 'deadline' | 'default' | 'title' | 'createdAt';
@@ -122,7 +123,7 @@ function TaskCard({
   const totalChecklistItems = task.checklist?.length || 0;
   const checklistProgress = totalChecklistItems > 0 ? (completedChecklistItems / totalChecklistItems) * 100 : 0;
 
-  const isOverdue = task.deadline && new Date(task.deadline) < new Date() && task.status.toLowerCase() !== 'done'; // Assuming 'done' is a status title
+  const isOverdue = task.deadline && new Date(task.deadline) < new Date() && task.status.toLowerCase() !== 'done';
 
   return (
     <Card
@@ -220,7 +221,6 @@ function TaskCard({
             </div>
           </div>
         )}
-         {/* Placeholder for assigned users in Beta mode */}
         {isBetaModeEnabled && task.assignedTo && task.assignedTo.length > 0 && (
           <div className="mt-1">
             <span className="text-xs font-semibold text-muted-foreground">Assigned to:</span>
@@ -231,7 +231,6 @@ function TaskCard({
                     <TooltipTrigger asChild>
                       <Badge variant="secondary" className="text-xs py-0.5 px-1.5">
                         <UserCircle className="h-3 w-3 mr-1" />
-                        {/* Fetch user display name here if possible, otherwise show ID */}
                         {userId.substring(0, 8)}...
                       </Badge>
                     </TooltipTrigger>
@@ -335,7 +334,7 @@ export function KanbanBoard() {
     addColumn, updateColumnTitle, deleteColumn, updateColumnWipLimit, 
     addChecklistItem, toggleChecklistItem, deleteChecklistItem, updateChecklistItemText, getTaskById,
   } = useTasks();
-  const { currentUser } = useAuth(); // For team/org context
+  const { currentUser } = useAuth();
   
   const activeBoard = getActiveBoard();
   const { isBetaModeEnabled } = useSettings();
@@ -349,23 +348,12 @@ export function KanbanBoard() {
   const [editingColumnId, setEditingColumnId] = useState<string | null>(null);
   const [currentEditingColumnTitle, setCurrentEditingColumnTitle] = useState('');
   const [isThemeCustomizerOpen, setIsThemeCustomizerOpen] = useState(false);
+  const isMobile = useIsMobile();
 
 
   const [priorityFilter, setPriorityFilter] = useState<PriorityFilter>('all');
   const [tagFilter, setTagFilter] = useState<string>('');
   const [columnSortOptions, setColumnSortOptions] = useState<Record<string, SortOption>>({});
-
-  // Placeholder for WebRTC state and functions
-  // const [isCollaborationActive, setIsCollaborationActive] = useState(false);
-  // const [collaborationPeers, setCollaborationPeers] = useState([]);
-  // useEffect(() => {
-  //   if (activeBoard && activeBoard.teamId && isBetaModeEnabled) {
-  //     // Initialize WebRTC connection here for the activeBoard.teamId
-  //     // Example: setupWebRTC(activeBoard.teamId, currentUser.id, handleIncomingData);
-  //     // return () => closeWebRTC();
-  //   }
-  // }, [activeBoard, currentUser, isBetaModeEnabled]);
-
 
   const boardInlineStyles = useMemo(() => {
     const theme = activeBoard?.theme;
@@ -410,7 +398,6 @@ export function KanbanBoard() {
   };
 
   const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
-    // Check if the mouse is leaving to an element that is not a child
     if (e.currentTarget.contains(e.relatedTarget as Node)) {
         return;
     }
@@ -478,7 +465,7 @@ export function KanbanBoard() {
     if (!isNaN(limit) && limit >=0) {
         updateColumnWipLimit(columnId, limit);
     } else if (limitStr === "") {
-        updateColumnWipLimit(columnId, undefined); // Set to undefined for no limit
+        updateColumnWipLimit(columnId, undefined);
     } else {
         toast({ title: "Invalid WIP Limit", description: "Please enter a valid number for WIP limit.", variant: "destructive"});
     }
@@ -533,7 +520,6 @@ export function KanbanBoard() {
     if (!activeBoard) return null;
     const parts = [];
     if (activeBoard.organizationId) {
-        // In a real app, you'd fetch the org/team names here
         parts.push(<span key="org" className="flex items-center gap-1"><Building className="h-3 w-3" /> Org: {activeBoard.organizationId.substring(0,6)}..</span>);
     }
     if (activeBoard.teamId) {
@@ -543,29 +529,18 @@ export function KanbanBoard() {
     return <Badge variant="outline" className="text-xs ml-2">{parts.reduce((prev, curr, i) => [prev, i > 0 && <span key={`sep-${i}`} className="mx-1">|</span>, curr] as any )}</Badge>;
   };
 
-
-  return (
-    <div 
-      className="p-4 space-y-6 animate-fadeInUp bg-[var(--board-background-color,hsl(var(--background)))] text-[var(--board-foreground-color,hsl(var(--foreground)))]" 
-      style={boardInlineStyles}
-    >
-      {showConfetti && windowSize.width > 0 && windowSize.height > 0 && (
-        <Confetti width={windowSize.width} height={windowSize.height} recycle={false} numberOfPieces={500} gravity={0.15} tweenDuration={7000}/>
-      )}
-      <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
-        <div className="flex items-center gap-2">
-            <AddTaskDialog open={isAddTaskDialogOpen} onOpenChange={setIsAddTaskDialogOpen} onAddTask={handleAddTaskLocal}>
-            <Button 
-                onClick={() => setIsAddTaskDialogOpen(true)} 
-                className="shadow-md hover:shadow-lg transition-shadow bg-[var(--board-primary-color,hsl(var(--primary)))] text-[var(--board-primary-foreground-color,hsl(var(--primary-foreground)))] hover:bg-[var(--board-primary-color,hsl(var(--primary)))]/90"
-            >
-                <Plus className="mr-2 h-4 w-4" /> Add Task
-            </Button>
-            </AddTaskDialog>
-            {boardOrgTeamInfo()}
-        </div>
-        
-        <div className="flex items-center gap-2">
+  const boardControls = (
+    <>
+        <AddTaskDialog open={isAddTaskDialogOpen} onOpenChange={setIsAddTaskDialogOpen} onAddTask={handleAddTaskLocal}>
+        <Button 
+            onClick={() => setIsAddTaskDialogOpen(true)} 
+            className="shadow-md hover:shadow-lg transition-shadow bg-[var(--board-primary-color,hsl(var(--primary)))] text-[var(--board-primary-foreground-color,hsl(var(--primary-foreground)))] hover:bg-[var(--board-primary-color,hsl(var(--primary)))]/90"
+        >
+            <Plus className="mr-2 h-4 w-4" /> Add Task
+        </Button>
+        </AddTaskDialog>
+        {boardOrgTeamInfo()}
+        <div className="flex items-center gap-2 ml-auto">
             {isBetaModeEnabled && (
             <Popover>
                 <PopoverTrigger asChild>
@@ -606,179 +581,403 @@ export function KanbanBoard() {
                 <Palette className="mr-2 h-4 w-4" /> Customize Board
             </Button>
         </div>
-      </div>
+    </>
+  );
 
-      <ScrollArea className="w-full pb-4">
-         <div className="flex gap-4 items-start">
-          {activeBoard.columns.map(column => {
-            const displayTasks = sortedAndFilteredTasks(column.tasks, column.id);
-            const wipLimitExceeded = column.wipLimit && column.wipLimit > 0 && column.tasks.length > column.wipLimit;
-            
-            return (
-              <div
-                key={column.id}
-                onDragOver={(e) => handleDragOver(e, column.id)}
-                onDrop={(e) => handleDrop(e, column.id)}
-                onDragLeave={handleDragLeave}
-                className={cn(
-                  "min-w-[300px] max-w-[350px] flex-shrink-0 bg-muted/30 dark:bg-neutral-800/50 rounded-lg shadow-lg transition-all duration-300 ease-in-out", 
-                  dragOverColumnId === column.id && "ring-2 ring-offset-2 dark:ring-offset-neutral-900 ring-[var(--board-primary-color,hsl(var(--primary)))]", 
-                  wipLimitExceeded && "border-2 border-destructive/70" 
-                )}
-              >
-                <CardHeader 
-                    className="p-3 border-b border-border/70 dark:border-neutral-700/70 flex flex-row justify-between items-center sticky top-0 backdrop-blur-sm z-10 rounded-t-lg bg-[var(--board-column-header-color,hsl(var(--muted)))] text-[var(--board-column-header-foreground-color,hsl(var(--muted-foreground)))]"
-                >
-                  {editingColumnId === column.id ? (
-                     <Input 
-                        value={currentEditingColumnTitle} 
-                        onChange={(e) => setCurrentEditingColumnTitle(e.target.value)} 
-                        onBlur={() => handleSaveColumnTitle(column.id)}
-                        onKeyDown={(e) => e.key === 'Enter' && handleSaveColumnTitle(column.id)}
-                        className="text-base font-semibold h-8 flex-grow mr-2"
-                        autoFocus
-                     />
-                  ) : (
-                    <CardTitle 
-                        className="text-base font-semibold cursor-pointer"
-                        onClick={() => isBetaModeEnabled && handleEditColumnTitle(column.id, column.title)}
-                    >
-                        {column.title} ({column.tasks.length})
-                        {isBetaModeEnabled && column.wipLimit && column.wipLimit > 0 && (
-                            <span className={cn("text-xs ml-1.5", wipLimitExceeded ? "text-destructive font-bold" : "text-muted-foreground")}>
-                                (WIP: {column.wipLimit})
-                            </span>
-                        )}
-                    </CardTitle>
-                  )}
-                  {isBetaModeEnabled && (
-                     <AlertDialog> 
-                        <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" size="icon" className="h-7 w-7">
-                                    <MoreHorizontal className="h-4 w-4" />
-                                </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                                <DropdownMenuItem onClick={() => handleEditColumnTitle(column.id, column.title)}>
-                                    <Edit2 className="mr-2 h-4 w-4" /> Rename Column
-                                </DropdownMenuItem>
-                                <DropdownMenuSub>
-                                    <DropdownMenuSubTrigger>
-                                        <ArrowUpDown className="mr-2 h-4 w-4" /> Sort Tasks By
-                                    </DropdownMenuSubTrigger>
-                                    <DropdownMenuPortal>
-                                    <DropdownMenuSubContent>
-                                        <DropdownMenuItem onClick={() => handleColumnSortChange(column.id, 'default')}>Default</DropdownMenuItem>
-                                        <DropdownMenuItem onClick={() => handleColumnSortChange(column.id, 'priority')}>Priority</DropdownMenuItem>
-                                        <DropdownMenuItem onClick={() => handleColumnSortChange(column.id, 'deadline')}>Deadline</DropdownMenuItem>
-                                        <DropdownMenuItem onClick={() => handleColumnSortChange(column.id, 'title')}>Title</DropdownMenuItem>
-                                        <DropdownMenuItem onClick={() => handleColumnSortChange(column.id, 'createdAt')}>Date Created</DropdownMenuItem>
-                                    </DropdownMenuSubContent>
-                                    </DropdownMenuPortal>
-                                </DropdownMenuSub>
-                                <DropdownMenuSeparator />
-                                <div className="p-2 space-y-1">
-                                    <Label htmlFor={`wip-${column.id}`} className="text-xs px-1">WIP Limit (0 for none)</Label>
-                                    <Input
-                                        id={`wip-${column.id}`}
-                                        type="number"
-                                        min="0"
-                                        placeholder="None"
-                                        defaultValue={column.wipLimit === undefined || column.wipLimit === 0 ? '' : column.wipLimit}
-                                        onChange={(e) => handleUpdateWipLimit(column.id, e.target.value)}
-                                        className="h-8 text-sm"
-                                    />
-                                </div>
-                                <DropdownMenuSeparator />
-                                <AlertDialogTrigger asChild>
-                                <DropdownMenuItem className="text-destructive focus:text-destructive focus:bg-destructive/10">
-                                    <Trash2 className="mr-2 h-4 w-4" /> Delete Column
-                                </DropdownMenuItem>
-                                </AlertDialogTrigger>
-                            </DropdownMenuContent>
-                        </DropdownMenu>
-                        <AlertDialogContent>
-                            <AlertDialogHeader>
-                            <AlertDialogTitle>Delete Column &quot;{column.title}&quot;?</AlertDialogTitle>
-                            <AlertDialogDescription>
-                                This will delete the column and all its tasks from the board &quot;{activeBoard.name}&quot;. This action cannot be undone.
-                            </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                            <AlertDialogCancel>Cancel</AlertDialogCancel>
-                            <AlertDialogAction onClick={() => deleteColumn(column.id)} className={buttonVariants({variant: "destructive"})}>Delete</AlertDialogAction>
-                            </AlertDialogFooter>
-                        </AlertDialogContent>
-                    </AlertDialog>
-                  )}
-                </CardHeader>
-                <ScrollArea className="h-[calc(100vh-18rem)] p-1 rounded-b-lg">
-                  <CardContent className="p-2 space-y-0">
-                  {wipLimitExceeded && (
-                      <div className="p-2 mb-2 text-xs text-destructive-foreground bg-destructive/80 rounded-md flex items-center gap-2 shadow-sm">
-                          <AlertTriangle className="h-4 w-4"/> WIP limit exceeded!
+
+  return (
+    <div 
+      className={cn("p-1 sm:p-4 space-y-4 sm:space-y-6 animate-fadeInUp bg-[var(--board-background-color,hsl(var(--background)))] text-[var(--board-foreground-color,hsl(var(--foreground)))]", isMobile ? "pb-16" : "")} 
+      style={boardInlineStyles}
+    >
+      {showConfetti && windowSize.width > 0 && windowSize.height > 0 && (
+        <Confetti width={windowSize.width} height={windowSize.height} recycle={false} numberOfPieces={500} gravity={0.15} tweenDuration={7000}/>
+      )}
+      
+      {isMobile ? (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" className="fixed bottom-4 right-4 z-20 rounded-full h-12 w-12 p-0 shadow-lg sm:hidden">
+              <MoreVertical className="h-5 w-5" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-56 mb-2">
+            <DropdownMenuItem onSelect={() => setIsAddTaskDialogOpen(true)}>
+              <Plus className="mr-2 h-4 w-4" /> Add Task
+            </DropdownMenuItem>
+            {isBetaModeEnabled && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger>
+                    <Filter className="mr-2 h-4 w-4" /> Filters & Sort
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuPortal>
+                  <DropdownMenuSubContent className="w-64 p-3 space-y-3">
+                      <div>
+                          <Label htmlFor="priority-filter-mobile" className="text-xs font-medium">Priority</Label>
+                          <Select value={priorityFilter} onValueChange={(value) => setPriorityFilter(value as PriorityFilter)}>
+                          <SelectTrigger id="priority-filter-mobile" className="mt-1 h-9 text-xs">
+                              <SelectValue placeholder="Select priority" />
+                          </SelectTrigger>
+                          <SelectContent>
+                              <SelectItem value="all">All</SelectItem>
+                              <SelectItem value="high">High</SelectItem>
+                              <SelectItem value="medium">Medium</SelectItem>
+                              <SelectItem value="low">Low</SelectItem>
+                          </SelectContent>
+                          </Select>
                       </div>
-                  )}
-                  {displayTasks.length === 0 && (
-                     <div className="text-center py-10 text-sm text-muted-foreground">
-                        Drag tasks here or add new ones.
-                     </div>
-                  )}
-                  {displayTasks.map(task => (
-                       <TaskCard
-                        key={task.id} 
-                        task={task}
-                        columnId={column.id}
-                        onDragStart={handleDragStart}
-                        onDragEnd={handleDragEnd}
-                        onUpdateTask={updateTask}
-                        onDeleteTask={deleteTask}
-                        onAddChecklistItem={addChecklistItem}
-                        onToggleChecklistItem={toggleChecklistItem}
-                        onDeleteChecklistItem={deleteChecklistItem}
-                        onUpdateChecklistItemText={updateChecklistItemText}
-                        isBetaModeEnabled={isBetaModeEnabled}
-                        getTaskById={getTaskById}
-                        dragOverColumnId={dragOverColumnId}
-                      />
-                  ))}
-                  </CardContent>
-                </ScrollArea>
-              </div>
-            );
-          })}
-           {isBetaModeEnabled && (
-            <div className="min-w-[300px] flex-shrink-0 p-2">
-              <Card className="bg-transparent border-dashed border-2 hover:border-[var(--board-primary-color,hsl(var(--primary)))]/70 transition-colors duration-200">
-                <CardContent className="p-3 flex flex-col items-center justify-center h-full">
-                    <Input 
-                        value={newColumnTitle}
-                        onChange={(e) => setNewColumnTitle(e.target.value)}
-                        placeholder="New column title"
-                        className="mb-2 h-9 text-sm"
-                        onKeyDown={(e) => e.key === 'Enter' && handleAddColumn()}
-                    />
-                    <Button onClick={handleAddColumn} variant="outline" size="sm" className="w-full shadow-sm hover:shadow-md">
-                        <Plus className="mr-2 h-4 w-4" /> Add Column
-                    </Button>
-                </CardContent>
-              </Card>
+                      <div>
+                          <Label htmlFor="tag-filter-mobile" className="text-xs font-medium">Tags</Label>
+                          <Input 
+                          id="tag-filter-mobile" 
+                          value={tagFilter} 
+                          onChange={(e) => setTagFilter(e.target.value)} 
+                          placeholder="e.g. design, dev"
+                          className="mt-1 h-9 text-xs"
+                          />
+                      </div>
+                  </DropdownMenuSubContent>
+                  </DropdownMenuPortal>
+                </DropdownMenuSub>
+              </>
+            )}
+            <DropdownMenuItem onSelect={() => setIsThemeCustomizerOpen(true)}>
+              <Palette className="mr-2 h-4 w-4" /> Customize Board
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ) : (
+        <div className="flex flex-col sm:flex-row justify-between items-center gap-2">
+            {boardControls}
+        </div>
+      )}
+
+
+      {isMobile ? (
+        <div className="flex flex-col gap-4 w-full">
+            {activeBoard.columns.map(column => {
+                const displayTasks = sortedAndFilteredTasks(column.tasks, column.id);
+                const wipLimitExceeded = column.wipLimit && column.wipLimit > 0 && column.tasks.length > column.wipLimit;
+                
+                return (
+                  <div
+                    key={column.id}
+                    onDragOver={(e) => handleDragOver(e, column.id)}
+                    onDrop={(e) => handleDrop(e, column.id)}
+                    onDragLeave={handleDragLeave}
+                    className={cn(
+                      "w-full bg-muted/30 dark:bg-neutral-800/50 rounded-lg shadow-md transition-all duration-300 ease-in-out", 
+                      dragOverColumnId === column.id && "ring-2 ring-offset-2 dark:ring-offset-neutral-900 ring-[var(--board-primary-color,hsl(var(--primary)))]", 
+                      wipLimitExceeded && "border-2 border-destructive/70" 
+                    )}
+                  >
+                    <CardHeader 
+                        className="p-3 border-b border-border/70 dark:border-neutral-700/70 flex flex-row justify-between items-center sticky top-0 backdrop-blur-sm z-10 rounded-t-lg bg-[var(--board-column-header-color,hsl(var(--muted)))] text-[var(--board-column-header-foreground-color,hsl(var(--muted-foreground)))]"
+                    >
+                      {editingColumnId === column.id ? (
+                         <Input 
+                            value={currentEditingColumnTitle} 
+                            onChange={(e) => setCurrentEditingColumnTitle(e.target.value)} 
+                            onBlur={() => handleSaveColumnTitle(column.id)}
+                            onKeyDown={(e) => e.key === 'Enter' && handleSaveColumnTitle(column.id)}
+                            className="text-base font-semibold h-8 flex-grow mr-2"
+                            autoFocus
+                         />
+                      ) : (
+                        <CardTitle 
+                            className="text-base font-semibold cursor-pointer"
+                            onClick={() => isBetaModeEnabled && handleEditColumnTitle(column.id, column.title)}
+                        >
+                            {column.title} ({column.tasks.length})
+                            {isBetaModeEnabled && column.wipLimit && column.wipLimit > 0 && (
+                                <span className={cn("text-xs ml-1.5", wipLimitExceeded ? "text-destructive font-bold" : "text-muted-foreground")}>
+                                    (WIP: {column.wipLimit})
+                                </span>
+                            )}
+                        </CardTitle>
+                      )}
+                      {isBetaModeEnabled && (
+                         <AlertDialog> 
+                            <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                    <Button variant="ghost" size="icon" className="h-7 w-7">
+                                        <MoreHorizontal className="h-4 w-4" />
+                                    </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                    <DropdownMenuItem onClick={() => handleEditColumnTitle(column.id, column.title)}>
+                                        <Edit2 className="mr-2 h-4 w-4" /> Rename Column
+                                    </DropdownMenuItem>
+                                    <DropdownMenuSub>
+                                        <DropdownMenuSubTrigger>
+                                            <ArrowUpDown className="mr-2 h-4 w-4" /> Sort Tasks By
+                                        </DropdownMenuSubTrigger>
+                                        <DropdownMenuPortal>
+                                        <DropdownMenuSubContent>
+                                            <DropdownMenuItem onClick={() => handleColumnSortChange(column.id, 'default')}>Default</DropdownMenuItem>
+                                            <DropdownMenuItem onClick={() => handleColumnSortChange(column.id, 'priority')}>Priority</DropdownMenuItem>
+                                            <DropdownMenuItem onClick={() => handleColumnSortChange(column.id, 'deadline')}>Deadline</DropdownMenuItem>
+                                            <DropdownMenuItem onClick={() => handleColumnSortChange(column.id, 'title')}>Title</DropdownMenuItem>
+                                            <DropdownMenuItem onClick={() => handleColumnSortChange(column.id, 'createdAt')}>Date Created</DropdownMenuItem>
+                                        </DropdownMenuSubContent>
+                                        </DropdownMenuPortal>
+                                    </DropdownMenuSub>
+                                    <DropdownMenuSeparator />
+                                    <div className="p-2 space-y-1">
+                                        <Label htmlFor={`wip-${column.id}`} className="text-xs px-1">WIP Limit (0 for none)</Label>
+                                        <Input
+                                            id={`wip-${column.id}`}
+                                            type="number"
+                                            min="0"
+                                            placeholder="None"
+                                            defaultValue={column.wipLimit === undefined || column.wipLimit === 0 ? '' : column.wipLimit}
+                                            onChange={(e) => handleUpdateWipLimit(column.id, e.target.value)}
+                                            className="h-8 text-sm"
+                                        />
+                                    </div>
+                                    <DropdownMenuSeparator />
+                                    <AlertDialogTrigger asChild>
+                                    <DropdownMenuItem className="text-destructive focus:text-destructive focus:bg-destructive/10">
+                                        <Trash2 className="mr-2 h-4 w-4" /> Delete Column
+                                    </DropdownMenuItem>
+                                    </AlertDialogTrigger>
+                                </DropdownMenuContent>
+                            </DropdownMenu>
+                            <AlertDialogContent className="w-[90vw] max-w-lg">
+                                <AlertDialogHeader>
+                                <AlertDialogTitle>Delete Column &quot;{column.title}&quot;?</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                    This will delete the column and all its tasks from the board &quot;{activeBoard.name}&quot;. This action cannot be undone.
+                                </AlertDialogDescription>
+                                </AlertDialogHeader>
+                                <AlertDialogFooter>
+                                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                <AlertDialogAction onClick={() => deleteColumn(column.id)} className={buttonVariants({variant: "destructive"})}>Delete</AlertDialogAction>
+                                </AlertDialogFooter>
+                            </AlertDialogContent>
+                        </AlertDialog>
+                      )}
+                    </CardHeader>
+                    <ScrollArea className={cn("p-1 rounded-b-lg", isMobile ? "max-h-[60vh]" : "h-[calc(100vh-18rem)]")}>
+                      <CardContent className="p-2 space-y-0">
+                      {wipLimitExceeded && (
+                          <div className="p-2 mb-2 text-xs text-destructive-foreground bg-destructive/80 rounded-md flex items-center gap-2 shadow-sm">
+                              <AlertTriangle className="h-4 w-4"/> WIP limit exceeded!
+                          </div>
+                      )}
+                      {displayTasks.length === 0 && (
+                         <div className="text-center py-10 text-sm text-muted-foreground">
+                            Drag tasks here or add new ones.
+                         </div>
+                      )}
+                      {displayTasks.map(task => (
+                           <TaskCard
+                            key={task.id} 
+                            task={task}
+                            columnId={column.id}
+                            onDragStart={handleDragStart}
+                            onDragEnd={handleDragEnd}
+                            onUpdateTask={updateTask}
+                            onDeleteTask={deleteTask}
+                            onAddChecklistItem={addChecklistItem}
+                            onToggleChecklistItem={toggleChecklistItem}
+                            onDeleteChecklistItem={deleteChecklistItem}
+                            onUpdateChecklistItemText={updateChecklistItemText}
+                            isBetaModeEnabled={isBetaModeEnabled}
+                            getTaskById={getTaskById}
+                            dragOverColumnId={dragOverColumnId}
+                          />
+                      ))}
+                      </CardContent>
+                    </ScrollArea>
+                  </div>
+                );
+              })}
+             {isMobile && isBetaModeEnabled && (
+                <div className="mt-4 p-2">
+                  <Card className="bg-transparent border-dashed border-2 hover:border-[var(--board-primary-color,hsl(var(--primary)))]/70 transition-colors duration-200">
+                    <CardContent className="p-3 flex flex-col items-center justify-center h-full">
+                        <Input 
+                            value={newColumnTitle}
+                            onChange={(e) => setNewColumnTitle(e.target.value)}
+                            placeholder="New column title"
+                            className="mb-2 h-9 text-sm"
+                            onKeyDown={(e) => e.key === 'Enter' && handleAddColumn()}
+                        />
+                        <Button onClick={handleAddColumn} variant="outline" size="sm" className="w-full shadow-sm hover:shadow-md">
+                            <Plus className="mr-2 h-4 w-4" /> Add Column
+                        </Button>
+                    </CardContent>
+                  </Card>
+                </div>
+              )}
+        </div>
+      ) : (
+        <ScrollArea className="w-full pb-4">
+            <div className="flex gap-4 items-start">
+            {activeBoard.columns.map(column => {
+                const displayTasks = sortedAndFilteredTasks(column.tasks, column.id);
+                const wipLimitExceeded = column.wipLimit && column.wipLimit > 0 && column.tasks.length > column.wipLimit;
+                
+                return (
+                <div
+                    key={column.id}
+                    onDragOver={(e) => handleDragOver(e, column.id)}
+                    onDrop={(e) => handleDrop(e, column.id)}
+                    onDragLeave={handleDragLeave}
+                    className={cn(
+                    "min-w-[300px] max-w-[350px] flex-shrink-0 bg-muted/30 dark:bg-neutral-800/50 rounded-lg shadow-lg transition-all duration-300 ease-in-out", 
+                    dragOverColumnId === column.id && "ring-2 ring-offset-2 dark:ring-offset-neutral-900 ring-[var(--board-primary-color,hsl(var(--primary)))]", 
+                    wipLimitExceeded && "border-2 border-destructive/70" 
+                    )}
+                >
+                    <CardHeader 
+                        className="p-3 border-b border-border/70 dark:border-neutral-700/70 flex flex-row justify-between items-center sticky top-0 backdrop-blur-sm z-10 rounded-t-lg bg-[var(--board-column-header-color,hsl(var(--muted)))] text-[var(--board-column-header-foreground-color,hsl(var(--muted-foreground)))]"
+                    >
+                    {editingColumnId === column.id ? (
+                        <Input 
+                            value={currentEditingColumnTitle} 
+                            onChange={(e) => setCurrentEditingColumnTitle(e.target.value)} 
+                            onBlur={() => handleSaveColumnTitle(column.id)}
+                            onKeyDown={(e) => e.key === 'Enter' && handleSaveColumnTitle(column.id)}
+                            className="text-base font-semibold h-8 flex-grow mr-2"
+                            autoFocus
+                        />
+                    ) : (
+                        <CardTitle 
+                            className="text-base font-semibold cursor-pointer"
+                            onClick={() => isBetaModeEnabled && handleEditColumnTitle(column.id, column.title)}
+                        >
+                            {column.title} ({column.tasks.length})
+                            {isBetaModeEnabled && column.wipLimit && column.wipLimit > 0 && (
+                                <span className={cn("text-xs ml-1.5", wipLimitExceeded ? "text-destructive font-bold" : "text-muted-foreground")}>
+                                    (WIP: {column.wipLimit})
+                                </span>
+                            )}
+                        </CardTitle>
+                    )}
+                    {isBetaModeEnabled && (
+                        <AlertDialog> 
+                            <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                    <Button variant="ghost" size="icon" className="h-7 w-7">
+                                        <MoreHorizontal className="h-4 w-4" />
+                                    </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                    <DropdownMenuItem onClick={() => handleEditColumnTitle(column.id, column.title)}>
+                                        <Edit2 className="mr-2 h-4 w-4" /> Rename Column
+                                    </DropdownMenuItem>
+                                    <DropdownMenuSub>
+                                        <DropdownMenuSubTrigger>
+                                            <ArrowUpDown className="mr-2 h-4 w-4" /> Sort Tasks By
+                                        </DropdownMenuSubTrigger>
+                                        <DropdownMenuPortal>
+                                        <DropdownMenuSubContent>
+                                            <DropdownMenuItem onClick={() => handleColumnSortChange(column.id, 'default')}>Default</DropdownMenuItem>
+                                            <DropdownMenuItem onClick={() => handleColumnSortChange(column.id, 'priority')}>Priority</DropdownMenuItem>
+                                            <DropdownMenuItem onClick={() => handleColumnSortChange(column.id, 'deadline')}>Deadline</DropdownMenuItem>
+                                            <DropdownMenuItem onClick={() => handleColumnSortChange(column.id, 'title')}>Title</DropdownMenuItem>
+                                            <DropdownMenuItem onClick={() => handleColumnSortChange(column.id, 'createdAt')}>Date Created</DropdownMenuItem>
+                                        </DropdownMenuSubContent>
+                                        </DropdownMenuPortal>
+                                    </DropdownMenuSub>
+                                    <DropdownMenuSeparator />
+                                    <div className="p-2 space-y-1">
+                                        <Label htmlFor={`wip-${column.id}`} className="text-xs px-1">WIP Limit (0 for none)</Label>
+                                        <Input
+                                            id={`wip-${column.id}`}
+                                            type="number"
+                                            min="0"
+                                            placeholder="None"
+                                            defaultValue={column.wipLimit === undefined || column.wipLimit === 0 ? '' : column.wipLimit}
+                                            onChange={(e) => handleUpdateWipLimit(column.id, e.target.value)}
+                                            className="h-8 text-sm"
+                                        />
+                                    </div>
+                                    <DropdownMenuSeparator />
+                                    <AlertDialogTrigger asChild>
+                                    <DropdownMenuItem className="text-destructive focus:text-destructive focus:bg-destructive/10">
+                                        <Trash2 className="mr-2 h-4 w-4" /> Delete Column
+                                    </DropdownMenuItem>
+                                    </AlertDialogTrigger>
+                                </DropdownMenuContent>
+                            </DropdownMenu>
+                            <AlertDialogContent className="w-[90vw] max-w-lg">
+                                <AlertDialogHeader>
+                                <AlertDialogTitle>Delete Column &quot;{column.title}&quot;?</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                    This will delete the column and all its tasks from the board &quot;{activeBoard.name}&quot;. This action cannot be undone.
+                                </AlertDialogDescription>
+                                </AlertDialogHeader>
+                                <AlertDialogFooter>
+                                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                <AlertDialogAction onClick={() => deleteColumn(column.id)} className={buttonVariants({variant: "destructive"})}>Delete</AlertDialogAction>
+                                </AlertDialogFooter>
+                            </AlertDialogContent>
+                        </AlertDialog>
+                    )}
+                    </CardHeader>
+                    <ScrollArea className={cn("p-1 rounded-b-lg", isMobile ? "max-h-[60vh]" : "h-[calc(100vh-18rem)]")}>
+                    <CardContent className="p-2 space-y-0">
+                    {wipLimitExceeded && (
+                        <div className="p-2 mb-2 text-xs text-destructive-foreground bg-destructive/80 rounded-md flex items-center gap-2 shadow-sm">
+                            <AlertTriangle className="h-4 w-4"/> WIP limit exceeded!
+                        </div>
+                    )}
+                    {displayTasks.length === 0 && (
+                        <div className="text-center py-10 text-sm text-muted-foreground">
+                            Drag tasks here or add new ones.
+                        </div>
+                    )}
+                    {displayTasks.map(task => (
+                        <TaskCard
+                            key={task.id} 
+                            task={task}
+                            columnId={column.id}
+                            onDragStart={handleDragStart}
+                            onDragEnd={handleDragEnd}
+                            onUpdateTask={updateTask}
+                            onDeleteTask={deleteTask}
+                            onAddChecklistItem={addChecklistItem}
+                            onToggleChecklistItem={toggleChecklistItem}
+                            onDeleteChecklistItem={deleteChecklistItem}
+                            onUpdateChecklistItemText={updateChecklistItemText}
+                            isBetaModeEnabled={isBetaModeEnabled}
+                            getTaskById={getTaskById}
+                            dragOverColumnId={dragOverColumnId}
+                        />
+                    ))}
+                    </CardContent>
+                    </ScrollArea>
+                </div>
+                );
+            })}
+            {!isMobile && isBetaModeEnabled && (
+                <div className="min-w-[300px] flex-shrink-0 p-2">
+                <Card className="bg-transparent border-dashed border-2 hover:border-[var(--board-primary-color,hsl(var(--primary)))]/70 transition-colors duration-200">
+                    <CardContent className="p-3 flex flex-col items-center justify-center h-full">
+                        <Input 
+                            value={newColumnTitle}
+                            onChange={(e) => setNewColumnTitle(e.target.value)}
+                            placeholder="New column title"
+                            className="mb-2 h-9 text-sm"
+                            onKeyDown={(e) => e.key === 'Enter' && handleAddColumn()}
+                        />
+                        <Button onClick={handleAddColumn} variant="outline" size="sm" className="w-full shadow-sm hover:shadow-md">
+                            <Plus className="mr-2 h-4 w-4" /> Add Column
+                        </Button>
+                    </CardContent>
+                </Card>
+                </div>
+            )}
             </div>
-          )}
-        </div>
-      </ScrollArea>
+        </ScrollArea>
+      )}
       <BoardThemeCustomizer board={activeBoard} open={isThemeCustomizerOpen} onOpenChange={setIsThemeCustomizerOpen} />
-       {/* Placeholder for WebRTC Collaboration UI for this board */}
-       {/* {isBetaModeEnabled && activeBoard && activeBoard.teamId && (
-        <div className="fixed bottom-4 right-4 p-4 bg-card shadow-lg rounded-lg border">
-          <h4 className="text-sm font-semibold mb-2">Collaboration Space (Team: {activeBoard.teamId.substring(0,6)}...)</h4>
-          <p className="text-xs text-muted-foreground">WebRTC features would go here.</p>
-          <Button size="sm" variant="outline" className="mt-2" onClick={() => alert('WebRTC not implemented yet.')}>
-            Start Call (Demo)
-          </Button>
-        </div>
-      )} */}
     </div>
   );
 }
+

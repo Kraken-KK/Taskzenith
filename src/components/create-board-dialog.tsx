@@ -1,3 +1,4 @@
+
 // src/components/create-board-dialog.tsx
 'use client';
 
@@ -42,7 +43,7 @@ export function CreateBoardDialog({ open, onOpenChange, children, targetGroupId 
         onOpenChange(isOpen);
     }}>
       {children && <DialogTrigger asChild>{children}</DialogTrigger>}
-      <DialogContent className="sm:max-w-[425px]">
+      <DialogContent className="w-[90vw] max-w-lg">
         <DialogHeader>
           <DialogTitle>Create New Board</DialogTitle>
           <DialogDescription>
@@ -73,3 +74,4 @@ export function CreateBoardDialog({ open, onOpenChange, children, targetGroupId 
     </Dialog>
   );
 }
+

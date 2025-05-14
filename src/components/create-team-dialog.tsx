@@ -1,3 +1,4 @@
+
 // src/components/create-team-dialog.tsx
 'use client';
 
@@ -22,7 +23,7 @@ import { useToast } from '@/hooks/use-toast';
 interface CreateTeamDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  organizationId: string | null; // ID of the organization this team will belong to
+  organizationId: string | null; 
   children?: React.ReactNode;
 }
 
@@ -48,9 +49,8 @@ export function CreateTeamDialog({ open, onOpenChange, organizationId, children 
     if (newTeam) {
       setTeamName('');
       setTeamDescription('');
-      onOpenChange(false); // Triggers refresh in parent if callback is set
+      onOpenChange(false); 
     }
-    // Error toasts are handled within createTeam context function
   };
 
   return (
@@ -62,7 +62,7 @@ export function CreateTeamDialog({ open, onOpenChange, organizationId, children 
         onOpenChange(isOpen);
     }}>
       {children && <DialogTrigger asChild>{children}</DialogTrigger>}
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="w-[90vw] max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Users className="h-6 w-6 text-primary" /> Create New Team
@@ -105,3 +105,4 @@ export function CreateTeamDialog({ open, onOpenChange, organizationId, children 
     </Dialog>
   );
 }
+

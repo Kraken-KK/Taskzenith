@@ -1,4 +1,5 @@
 
+
 'use client';
 
 import React, { useState, useEffect } from 'react';
@@ -44,7 +45,7 @@ export function RenameBoardDialog({ board, open, onOpenChange }: RenameBoardDial
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[425px]">
+      <DialogContent className="w-[90vw] max-w-lg">
         <DialogHeader>
           <DialogTitle>Rename Board</DialogTitle>
           <DialogDescription>
@@ -73,3 +74,4 @@ export function RenameBoardDialog({ board, open, onOpenChange }: RenameBoardDial
     </Dialog>
   );
 }
+
