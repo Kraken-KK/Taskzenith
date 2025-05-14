@@ -48,7 +48,7 @@ export interface Board {
   groupId?: string | null; // Optional: ID of the group this board belongs to
   organizationId?: string | null; // For associating with an organization
   teamId?: string | null; // For associating with a team
-  isPublic?: boolean; // For future public sharing features
+  isPublic: boolean; 
 }
 
 // Define the structure of a Board Group
@@ -84,6 +84,19 @@ export interface Organization {
 
 // ---- Chat Feature Types ----
 
+export interface PollOption {
+  id: string;
+  text: string;
+  voterIds: string[]; // Array of user IDs who voted for this option
+}
+
+export interface Poll {
+  question: string;
+  options: PollOption[];
+  createdBy: string; // User ID of the poll creator
+  createdAt: string; // ISO string
+}
+
 export interface ChatMessage {
   id: string;
   chatRoomId: string;
@@ -91,6 +104,7 @@ export interface ChatMessage {
   senderDisplayName: string;
   text: string;
   createdAt: string; // ISO string for Firestore serverTimestamp
+  poll?: Poll; // Optional poll object
 }
 
 export interface ChatRoom {

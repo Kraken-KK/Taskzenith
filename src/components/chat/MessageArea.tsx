@@ -2,17 +2,19 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import type { ChatRoom, ChatMessage } from '@/types';
+import type { ChatRoom, ChatMessage, Poll } from '@/types';
 import type { AppUser } from '@/contexts/AuthContext';
-import { sendMessage, getChatRoomMessagesStream } from '@/services/chatService';
+import { sendMessage, getChatRoomMessagesStream, voteOnPoll } from '@/services/chatService';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Send, User, Loader2, MessageSquare, ArrowLeft } from 'lucide-react';
+import { Send, User, Loader2, MessageSquare, ArrowLeft, BarChart3, CheckCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { format, parseISO, isToday, isYesterday } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
+import { CreatePollDialog } from './CreatePollDialog'; // Import CreatePollDialog
+import { Progress } from '@/components/ui/progress';
 
 interface MessageAreaProps {
   chatRoom: ChatRoom;
@@ -28,6 +30,7 @@ export function MessageArea({ chatRoom, currentUser, onBack }: MessageAreaProps)
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
+  const [isCreatePollDialogOpen, setIsCreatePollDialogOpen] = useState(false);
 
   useEffect(() => {
     setIsLoadingMessages(true);
@@ -42,7 +45,9 @@ export function MessageArea({ chatRoom, currentUser, onBack }: MessageAreaProps)
     if (scrollAreaRef.current) {
       const scrollViewport = scrollAreaRef.current.querySelector('div[data-radix-scroll-area-viewport]');
       if (scrollViewport) {
-        scrollViewport.scrollTo({ top: scrollViewport.scrollHeight, behavior: messages.length > 1 ? 'smooth' : 'auto' });
+        setTimeout(() => { // Add a small delay to ensure DOM is updated
+            scrollViewport.scrollTo({ top: scrollViewport.scrollHeight, behavior: 'smooth' });
+        }, 100);
       }
     }
   }, [messages]);
@@ -60,13 +65,14 @@ export function MessageArea({ chatRoom, currentUser, onBack }: MessageAreaProps)
   }, [chatRoom, currentUser.id]);
 
 
-  const handleSendMessage = async (e?: React.FormEvent<HTMLFormElement>) => {
+  const handleSendMessage = async (e?: React.FormEvent<HTMLFormElement>, pollData?: Poll) => {
     e?.preventDefault();
-    if (!newMessage.trim() || !currentUser.displayName || isSending) return;
+    const textToSend = newMessage.trim();
+    if ((!textToSend && !pollData) || !currentUser.displayName || isSending) return;
 
     setIsSending(true);
     try {
-      await sendMessage(chatRoom.id, currentUser.id, currentUser.displayName, newMessage);
+      await sendMessage(chatRoom.id, currentUser.id, currentUser.displayName, textToSend, pollData);
       setNewMessage('');
     } catch (error) {
       console.error("Error sending message:", error);
@@ -74,6 +80,26 @@ export function MessageArea({ chatRoom, currentUser, onBack }: MessageAreaProps)
     } finally {
         setIsSending(false);
         inputRef.current?.focus();
+    }
+  };
+  
+  const handleCreatePollSubmit = (poll: Poll, pollMessageText: string) => {
+    setNewMessage(pollMessageText); // Set the message text, can be overridden by user or be the poll question
+    // The actual sending will happen through a modified handleSendMessage or a new dedicated function
+    // For now, we'll rely on the user to press send after the dialog sets the poll data.
+    // A better approach would be to directly call sendMessage from here.
+    handleSendMessage(undefined, poll);
+    toast({ title: "Poll Ready", description: "Poll created and attached. Send your message." });
+  };
+
+  const handleVote = async (messageId: string, optionId: string) => {
+    if (!currentUser) return;
+    try {
+      await voteOnPoll(chatRoom.id, messageId, optionId, currentUser.id);
+      toast({title: "Vote Cast!", description: "Your vote has been recorded."});
+    } catch (error) {
+      console.error("Error voting on poll:", error);
+      toast({title: "Vote Error", description: "Could not cast your vote.", variant: "destructive"});
     }
   };
 
@@ -92,6 +118,49 @@ export function MessageArea({ chatRoom, currentUser, onBack }: MessageAreaProps)
       return "Invalid date";
     }
   };
+  
+  const PollDisplay = ({ msg }: { msg: ChatMessage }) => {
+    if (!msg.poll) return null;
+    const poll = msg.poll;
+    const totalVotes = poll.options.reduce((sum, opt) => sum + opt.voterIds.length, 0);
+    const userVote = poll.options.find(opt => opt.voterIds.includes(currentUser.id));
+
+    return (
+        <div className="mt-2 p-3 border rounded-md bg-background/30 dark:bg-neutral-700/50">
+            <p className="font-semibold text-sm mb-2">{poll.question}</p>
+            <div className="space-y-2">
+                {poll.options.map(option => {
+                    const voteCount = option.voterIds.length;
+                    const percentage = totalVotes > 0 ? (voteCount / totalVotes) * 100 : 0;
+                    const hasVotedForThis = userVote?.id === option.id;
+                    return (
+                        <div key={option.id}>
+                            <div className="flex justify-between items-center text-xs mb-0.5">
+                                <span>{option.text}</span>
+                                <span>{voteCount} vote{voteCount === 1 ? '' : 's'} ({percentage.toFixed(0)}%)</span>
+                            </div>
+                            <Progress value={percentage} className="h-2 mb-1" />
+                            <Button 
+                                variant={hasVotedForThis ? "default" : "outline"} 
+                                size="sm" 
+                                className="w-full text-xs h-7"
+                                onClick={() => handleVote(msg.id, option.id)}
+                                disabled={isLoadingMessages || isSending} // Potentially add a specific loading state for voting
+                            >
+                                {hasVotedForThis && <CheckCircle className="mr-1.5 h-3.5 w-3.5" />}
+                                {hasVotedForThis ? "Voted" : "Vote"}
+                            </Button>
+                        </div>
+                    );
+                })}
+            </div>
+            <p className="text-[10px] text-muted-foreground mt-2">
+                Poll created by {poll.createdBy === currentUser.id ? "You" : messages.find(m => m.id === msg.id)?.senderDisplayName || "User"} on {formatMessageTimestamp(poll.createdAt)}.
+            </p>
+        </div>
+    );
+  };
+
 
   return (
     <div className="flex flex-col h-full">
@@ -103,13 +172,11 @@ export function MessageArea({ chatRoom, currentUser, onBack }: MessageAreaProps)
           </Button>
         )}
         <Avatar className="h-8 w-8 sm:h-9 sm:w-9">
-           {/* Add other user's avatar image if available */}
            <AvatarFallback className="bg-muted text-xs sm:text-sm">
             {getOtherMemberName().charAt(0).toUpperCase() || <User className="h-4 w-4"/>}
            </AvatarFallback>
         </Avatar>
         <h3 className="text-base sm:text-lg font-semibold truncate">{getOtherMemberName()}</h3>
-        {/* Add more header info like online status or group member count later */}
       </header>
 
       <ScrollArea className="flex-1 p-3 sm:p-4" ref={scrollAreaRef}>
@@ -134,7 +201,7 @@ export function MessageArea({ chatRoom, currentUser, onBack }: MessageAreaProps)
                 )}
               >
                 {msg.senderId !== currentUser.id && (
-                  <Avatar className="h-7 w-7 sm:h-8 sm:w-8 shrink-0">
+                  <Avatar className="h-7 w-7 sm:h-8 sm:w-8 shrink-0 self-start">
                     <AvatarFallback className="bg-muted text-xs">
                       {msg.senderDisplayName?.charAt(0).toUpperCase() || <User className="h-3.5 w-3.5 sm:h-4 sm:w-4" />}
                     </AvatarFallback>
@@ -148,7 +215,8 @@ export function MessageArea({ chatRoom, currentUser, onBack }: MessageAreaProps)
                       : 'bg-muted text-foreground rounded-bl-lg dark:bg-neutral-700 dark:text-neutral-100'
                   )}
                 >
-                  <p className="whitespace-pre-wrap">{msg.text}</p>
+                  {msg.text && <p className="whitespace-pre-wrap">{msg.text}</p>}
+                  {msg.poll && <PollDisplay msg={msg} />}
                   <p className={cn(
                       "text-[10px] sm:text-xs mt-1 sm:mt-1.5 opacity-70",
                       msg.senderId === currentUser.id ? "text-right" : "text-left"
@@ -157,7 +225,7 @@ export function MessageArea({ chatRoom, currentUser, onBack }: MessageAreaProps)
                   </p>
                 </div>
                 {msg.senderId === currentUser.id && (
-                  <Avatar className="h-7 w-7 sm:h-8 sm:w-8 shrink-0">
+                  <Avatar className="h-7 w-7 sm:h-8 sm:w-8 shrink-0 self-start">
                     {currentUser.photoURL && <AvatarImage src={currentUser.photoURL} />}
                     <AvatarFallback className="bg-primary text-primary-foreground text-xs">
                       {currentUser.displayName?.charAt(0).toUpperCase() || <User className="h-3.5 w-3.5 sm:h-4 sm:w-4" />}
@@ -171,7 +239,17 @@ export function MessageArea({ chatRoom, currentUser, onBack }: MessageAreaProps)
       </ScrollArea>
 
       <footer className="p-2 sm:p-3 border-t bg-card/80 backdrop-blur-sm sticky bottom-0 z-10">
-        <form onSubmit={handleSendMessage} className="flex items-center gap-2">
+        <form onSubmit={(e) => handleSendMessage(e)} className="flex items-center gap-2">
+          <CreatePollDialog
+            open={isCreatePollDialogOpen}
+            onOpenChange={setIsCreatePollDialogOpen}
+            onSubmit={handleCreatePollSubmit}
+          >
+            <Button variant="ghost" size="icon" type="button" className="rounded-lg h-9 w-9 sm:h-10 sm:w-10 shrink-0 text-muted-foreground hover:text-primary">
+              <BarChart3 className="h-4 w-4 sm:h-5 sm:w-5" />
+              <span className="sr-only">Create Poll</span>
+            </Button>
+          </CreatePollDialog>
           <Input
             ref={inputRef}
             value={newMessage}
@@ -181,7 +259,7 @@ export function MessageArea({ chatRoom, currentUser, onBack }: MessageAreaProps)
             className="flex-1 h-9 sm:h-10 text-sm rounded-lg transition-shadow duration-200 focus:shadow-lg"
             autoComplete="off"
           />
-          <Button type="submit" size="icon" disabled={isSending || !newMessage.trim() || isLoadingMessages} className="rounded-lg h-9 w-9 sm:h-10 sm:w-10 shrink-0">
+          <Button type="submit" size="icon" disabled={isSending || (!newMessage.trim() && !messages.find(m => m.poll && !m.text)) || isLoadingMessages} className="rounded-lg h-9 w-9 sm:h-10 sm:w-10 shrink-0">
             {isSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
             <span className="sr-only">Send</span>
           </Button>

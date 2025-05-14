@@ -17,9 +17,10 @@ import {
   deleteDoc,
   writeBatch,
   getDoc,
-  setDoc
+  setDoc,
+  runTransaction
 } from 'firebase/firestore';
-import type { ChatMessage, ChatRoom } from '@/types';
+import type { ChatMessage, ChatRoom, Poll } from '@/types';
 import { formatISO } from 'date-fns';
 
 // Helper to generate a consistent private chat room ID
@@ -82,26 +83,35 @@ export const sendMessage = async (
   chatRoomId: string,
   senderId: string,
   senderDisplayName: string,
-  text: string
+  text: string,
+  poll?: Poll // Add poll as an optional parameter
 ): Promise<void> => {
-  if (!text.trim()) return;
+  if (!text.trim() && !poll) return; // Message must have text or a poll
 
   const messagesColRef = collection(db, 'chatRooms', chatRoomId, 'messages');
   const chatRoomRef = doc(db, 'chatRooms', chatRoomId);
 
   try {
-    const newMessageData: Omit<ChatMessage, 'id' | 'createdAt'> & { createdAt: Timestamp } = {
+    const newMessageData: Omit<ChatMessage, 'id' | 'createdAt'> & { createdAt: Timestamp, poll?: Poll } = {
       chatRoomId,
       senderId,
       senderDisplayName,
       text: text.trim(),
       createdAt: serverTimestamp() as Timestamp,
     };
+    if (poll) {
+      newMessageData.poll = poll;
+    }
     await addDoc(messagesColRef, newMessageData);
 
     // Update the chat room's last message details
+    let lastMessageText = text.trim();
+    if (poll && !lastMessageText) { // If only a poll is sent, use its question as last message text
+        lastMessageText = `Poll: ${poll.question}`;
+    }
+
     await updateDoc(chatRoomRef, {
-      lastMessageText: text.trim(),
+      lastMessageText: lastMessageText.length > 100 ? lastMessageText.substring(0, 97) + "..." : lastMessageText,
       lastMessageAt: serverTimestamp(),
       lastMessageSenderId: senderId,
     });
@@ -111,12 +121,71 @@ export const sendMessage = async (
   }
 };
 
+
+export const voteOnPoll = async (
+  chatRoomId: string,
+  messageId: string,
+  optionId: string,
+  userId: string
+): Promise<void> => {
+  const messageRef = doc(db, 'chatRooms', chatRoomId, 'messages', messageId);
+
+  try {
+    await runTransaction(db, async (transaction) => {
+      const messageSnap = await transaction.get(messageRef);
+      if (!messageSnap.exists()) {
+        throw new Error("Message not found");
+      }
+
+      const messageData = messageSnap.data() as ChatMessage;
+      if (!messageData.poll) {
+        throw new Error("Poll not found in this message");
+      }
+
+      const currentPoll = messageData.poll;
+      const newOptions = currentPoll.options.map(opt => {
+        let newVoterIds = [...opt.voterIds];
+        // Remove user's vote from any other option
+        if (opt.id !== optionId && newVoterIds.includes(userId)) {
+          newVoterIds = newVoterIds.filter(voter => voter !== userId);
+        }
+        // Add or remove vote for the selected option
+        if (opt.id === optionId) {
+          if (newVoterIds.includes(userId)) {
+            // User is un-voting (not typical for basic polls, but can be supported)
+            // For this implementation, let's assume clicking again does nothing or re-affirms.
+            // To allow un-voting: newVoterIds = newVoterIds.filter(voter => voter !== userId);
+          } else {
+            newVoterIds.push(userId);
+          }
+        }
+        return { ...opt, voterIds: newVoterIds };
+      });
+      
+      // Ensure user is only in one voterIds list
+      const finalOptions = newOptions.map(opt => {
+          if (opt.id !== optionId && opt.voterIds.includes(userId)) {
+              return { ...opt, voterIds: opt.voterIds.filter(vID => vID !== userId) };
+          }
+          return opt;
+      });
+
+
+      transaction.update(messageRef, { poll: { ...currentPoll, options: finalOptions } });
+    });
+  } catch (error) {
+    console.error("Error voting on poll:", error);
+    throw error;
+  }
+};
+
+
 export const getChatRoomMessagesStream = (
   chatRoomId: string,
   callback: (messages: ChatMessage[]) => void
 ): (() => void) => {
   const messagesColRef = collection(db, 'chatRooms', chatRoomId, 'messages');
-  const q = query(messagesColRef, orderBy('createdAt', 'asc'), limit(100)); // Get last 100 messages
+  const q = query(messagesColRef, orderBy('createdAt', 'asc'), limit(100)); 
 
   const unsubscribe = onSnapshot(
     q,
@@ -127,6 +196,11 @@ export const getChatRoomMessagesStream = (
           id: docSnap.id,
           ...data,
           createdAt: (data.createdAt as Timestamp)?.toDate ? formatISO((data.createdAt as Timestamp).toDate()) : formatISO(new Date()),
+          poll: data.poll ? { // Ensure poll data is correctly typed
+            ...data.poll,
+            createdAt: (data.poll.createdAt as Timestamp)?.toDate ? formatISO((data.poll.createdAt as Timestamp).toDate()) : (typeof data.poll.createdAt === 'string' ? data.poll.createdAt : formatISO(new Date())),
+            options: data.poll.options.map((opt: any) => ({...opt, voterIds: Array.isArray(opt.voterIds) ? opt.voterIds : [] }))
+          } : undefined,
         } as ChatMessage;
       });
       callback(messages);
@@ -144,16 +218,13 @@ export const getUserChatRoomsStream = (
   callback: (chatRooms: ChatRoom[]) => void
 ): (() => void) => {
   if (!userId) {
-    return () => {}; // Return a no-op unsubscribe function if no userId
+    return () => {}; 
   }
-  // This query requires that user documents store an array of chatRoomIds they are part of.
-  // Or, query chatRooms where memberIds array-contains userId.
-  // The latter is more scalable if a user can be in many chat rooms.
   const chatRoomsColRef = collection(db, 'chatRooms');
   const q = query(
     chatRoomsColRef, 
     where('memberIds', 'array-contains', userId), 
-    orderBy('lastMessageAt', 'desc') // Order by most recent activity
+    orderBy('lastMessageAt', 'desc') 
   );
 
   const unsubscribe = onSnapshot(
@@ -177,8 +248,3 @@ export const getUserChatRoomsStream = (
 
   return unsubscribe;
 };
-
-// Placeholder for future group chat functionality
-// export const createGroupChatRoom = async (...) => { ... };
-// export const addUserToGroupChat = async (...) => { ... };
-// export const removeUserFromGroupChat = async (...) => { ... };
