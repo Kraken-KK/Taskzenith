@@ -4,7 +4,7 @@
 
 import React, { useEffect, useState } from 'react';
 import type { AiChatSession } from '@/types';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button'; // Added buttonVariants
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { PlusCircle, MessageSquare, Trash2, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
