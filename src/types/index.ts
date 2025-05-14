@@ -1,3 +1,4 @@
+
 // src/types/index.ts
 
 // Define the structure of a checklist item
@@ -122,4 +123,20 @@ export interface ChatRoom {
   createdBy?: string;
   groupAdmins?: string[];
   groupImage?: string;
+}
+
+// ---- AI Chat Specific Types ----
+export interface MessageHistoryItem {
+  role: 'user' | 'model';
+  parts: Array<{ text: string }>;
+}
+
+export interface AiChatSession {
+  id: string;
+  userId: string;
+  name: string;
+  createdAt: string; // ISO string
+  lastUpdatedAt: string; // ISO string
+  messages: MessageHistoryItem[];
+  status?: 'active' | 'archived'; // Optional: for future archiving feature
 }

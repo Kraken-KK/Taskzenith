@@ -16,15 +16,22 @@ import {
   type PreferenceUpdate,
   type ToolCallRequest,
 } from '@/ai/flows/chat-flow';
-import { MessageHistoryItem } from '@/ai/schemas'; // Import from new schemas file
+import { nameChatSession } from '@/ai/flows/name-chat-session-flow';
+import type { MessageHistoryItem, AiChatSession } from '@/types';
 import { useTasks } from '@/contexts/TaskContext';
 import { useSettings } from '@/contexts/SettingsContext';
 import { useAuth } from '@/contexts/AuthContext';
-import { db } from '@/lib/firebase';
-import { doc, getDoc, updateDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
-import type { Task, Column } from '@/types';
+import { AiChatSessionList } from './ai-chat/AiChatSessionList';
+import {
+  getAiChatSessionsStream,
+  createAiChatSession,
+  updateAiChatSession,
+  deleteAiChatSession,
+  getAiChatSessionMessages,
+} from '@/services/aiChatService';
+
 
 interface DisplayMessage {
   id: string;
@@ -34,13 +41,20 @@ interface DisplayMessage {
   toolCalls?: ToolCallRequest[];
 }
 
-const MAX_HISTORY_LENGTH = 20; // Max messages to send to AI
+const MAX_HISTORY_FOR_AI = 20; // Max messages to send to AI
+const MIN_MESSAGES_FOR_AUTONAME = 4; // User messages + AI responses before attempting to name
 
 export function AiChat() {
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [isLoadingHistory, setIsLoadingHistory] = useState(true); // For initial load
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false); // For loading session messages
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [activeSessionName, setActiveSessionName] = useState<string>("New Chat");
+
+  const [savedSessions, setSavedSessions] = useState<AiChatSession[]>([]);
+  const [isLoadingSessions, setIsLoadingSessions] = useState(true);
+
 
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -59,77 +73,74 @@ export function AiChat() {
     }
   }, []);
 
-  // Load last chat history on mount
+  // Fetch list of saved sessions
   useEffect(() => {
-    const loadChatHistory = async () => {
-      if (currentUser && !isGuest) {
-        setIsLoadingHistory(true);
-        const userDocRef = doc(db, 'users', currentUser.id);
-        try {
-          const userDocSnap = await getDoc(userDocRef);
-          if (userDocSnap.exists()) {
-            const userData = userDocSnap.data();
-            if (userData.aiChatHistory && userData.aiChatHistory.messages) {
-              const historyFromFirestore: MessageHistoryItem[] = userData.aiChatHistory.messages;
-              const displayMessages: DisplayMessage[] = historyFromFirestore.map((item, index) => ({
-                id: `hist-${Date.now()}-${index}`,
-                sender: item.role === 'model' ? 'ai' : 'user',
-                text: item.parts[0]?.text || '',
-                timestamp: Date.now() - (historyFromFirestore.length - index) * 1000, // Approximate timestamp
-              }));
-              setMessages(displayMessages);
-            }
-          }
-        } catch (error) {
-          console.error("Error loading chat history:", error);
-          toast({ title: "Error", description: "Could not load previous chat.", variant: "destructive"});
-        } finally {
-          setIsLoadingHistory(false);
-          scrollToBottom();
-        }
-      } else {
-        setIsLoadingHistory(false); // No user or guest, no history to load
-      }
-    };
-    // Reset messages to empty when component mounts (new chat)
-    setMessages([]);
-    setIsLoadingHistory(false); // Assume no history load needed if chat is new on mount
-    inputRef.current?.focus();
-  }, [currentUser, isGuest, toast, scrollToBottom]);
+    if (currentUser && !isGuest) {
+      setIsLoadingSessions(true);
+      const unsubscribe = getAiChatSessionsStream(currentUser.id, (fetchedSessions) => {
+        setSavedSessions(fetchedSessions);
+        setIsLoadingSessions(false);
+      });
+      return () => unsubscribe();
+    } else {
+      setSavedSessions([]);
+      setIsLoadingSessions(false);
+    }
+  }, [currentUser, isGuest]);
 
 
   useEffect(() => {
     scrollToBottom();
   }, [messages, scrollToBottom]);
 
+  const convertDisplayMessagesToHistoryItems = (displayMessages: DisplayMessage[]): MessageHistoryItem[] => {
+    return displayMessages
+      .filter(msg => msg.sender === 'user' || msg.sender === 'ai')
+      .map(msg => ({
+        role: msg.sender === 'user' ? 'user' : 'model',
+        parts: [{ text: typeof msg.text === 'string' ? msg.text : 'Structured AI Message' }]
+      }));
+  };
+  
+  const convertHistoryItemsToDisplayMessages = (historyItems: MessageHistoryItem[]): DisplayMessage[] => {
+    return historyItems.map((item, index) => ({
+      id: `hist-${Date.now()}-${index}`,
+      sender: item.role === 'model' ? 'ai' : 'user',
+      text: item.parts[0]?.text || '',
+      timestamp: Date.now() - (historyItems.length - index) * 1000, // Approximate timestamp
+    }));
+  };
 
-  const saveChatHistory = useCallback(async (currentDisplayMessages: DisplayMessage[]) => {
-    if (currentUser && !isGuest && currentDisplayMessages.length > 0) {
-      const userDocRef = doc(db, 'users', currentUser.id);
-      const historyForFirestore: MessageHistoryItem[] = currentDisplayMessages
-        .filter(msg => msg.sender === 'user' || msg.sender === 'ai')
-        .slice(-MAX_HISTORY_LENGTH * 2) // Keep a reasonable amount
-        .map(msg => ({
-          role: msg.sender === 'user' ? 'user' : 'model',
-          parts: [{ text: typeof msg.text === 'string' ? msg.text : 'Structured AI Message' }]
-        }));
 
+  const saveOrUpdateSession = useCallback(async (currentDisplayMessages: DisplayMessage[], currentSessionId: string | null, currentName?: string) => {
+    if (!currentUser || isGuest || currentDisplayMessages.length === 0) return currentSessionId;
+
+    const historyForFirestore = convertDisplayMessagesToHistoryItems(currentDisplayMessages);
+
+    if (currentSessionId) { // Update existing session
+      await updateAiChatSession(currentUser.id, currentSessionId, historyForFirestore, currentName === "New Chat" ? undefined : currentName);
+      return currentSessionId;
+    } else if (historyForFirestore.length >= MIN_MESSAGES_FOR_AUTONAME) { // Create new session if enough messages
       try {
-        // Ensure user document and aiChatHistory field exist
-        const userDocSnap = await getDoc(userDocRef);
-        if (!userDocSnap.exists()) {
-            // This should ideally be handled by AuthContext's initializeFirestoreUserData
-            await setDoc(userDocRef, { aiChatHistory: { messages: historyForFirestore, lastUpdatedAt: serverTimestamp() } }, { merge: true });
-        } else {
-            await updateDoc(userDocRef, {
-                'aiChatHistory.messages': historyForFirestore,
-                'aiChatHistory.lastUpdatedAt': serverTimestamp()
-            });
+        const nameResponse = await nameChatSession({ messagesPreview: historyForFirestore.slice(0, 6) });
+        const newName = nameResponse.sessionName || `Chat from ${new Date().toLocaleTimeString()}`;
+        const newSessionId = await createAiChatSession(currentUser.id, newName, historyForFirestore);
+        if (newSessionId) {
+          setActiveSessionName(newName);
+          return newSessionId;
         }
       } catch (error) {
-        console.error("Error saving chat history:", error);
+        console.error("Error naming or creating AI chat session:", error);
+        // Fallback: create session with a generic name if naming fails
+        const fallbackName = `Chat - ${new Date().toLocaleString()}`;
+        const newSessionId = await createAiChatSession(currentUser.id, fallbackName, historyForFirestore);
+        if (newSessionId) {
+          setActiveSessionName(fallbackName);
+          return newSessionId;
+        }
       }
     }
+    return null; // Not enough messages to save a new session, or error
   }, [currentUser, isGuest]);
 
 
@@ -161,8 +172,8 @@ export function AiChat() {
       return;
     }
 
-    let foundTask: Task | undefined;
-    let sourceColumn: Column | undefined;
+    let foundTask: any | undefined; // Using 'any' as Task type might not be directly compatible
+    let sourceColumn: any | undefined;
 
     for (const col of activeBoard.columns) {
       foundTask = col.tasks.find(t =>
@@ -222,6 +233,47 @@ export function AiChat() {
     };
     setMessages(prev => [...prev, systemMessage]);
   };
+  
+  const handleSelectSession = async (sessionId: string, sessionName: string) => {
+    if (!currentUser) return;
+    setIsLoadingHistory(true);
+    setMessages([]); // Clear current messages
+    setActiveSessionId(sessionId);
+    setActiveSessionName(sessionName);
+    try {
+        const sessionMessages = await getAiChatSessionMessages(currentUser.id, sessionId);
+        setMessages(convertHistoryItemsToDisplayMessages(sessionMessages));
+    } catch (error) {
+        console.error("Error loading session messages:", error);
+        toast({title: "Error", description: "Could not load chat session.", variant: "destructive"});
+        setMessages([]); // Clear on error
+    } finally {
+        setIsLoadingHistory(false);
+        scrollToBottom();
+    }
+  };
+
+  const handleNewChat = () => {
+    setActiveSessionId(null);
+    setActiveSessionName("New Chat");
+    setMessages([]);
+    inputRef.current?.focus();
+  };
+
+  const handleDeleteCurrentSession = async (sessionIdToDelete: string) => {
+    if (!currentUser || !sessionIdToDelete) return;
+    try {
+      await deleteAiChatSession(currentUser.id, sessionIdToDelete);
+      if (activeSessionId === sessionIdToDelete) {
+        handleNewChat(); // If active session is deleted, start a new chat
+      }
+      // The session list will update via its own stream listener
+    } catch (error) {
+      console.error("Error deleting session:", error);
+      toast({ title: "Deletion Failed", description: "Could not delete the chat session.", variant: "destructive"});
+    }
+  };
+
 
   const handleSendMessage = async (e?: React.FormEvent<HTMLFormElement>) => {
     e?.preventDefault();
@@ -254,13 +306,8 @@ export function AiChat() {
     };
     setMessages(prev => [...prev, thinkingMessage]);
 
-    const historyForAI: MessageHistoryItem[] = currentMessagesWithUser
-      .filter(msg => msg.sender === 'user' || msg.sender === 'ai')
-      .slice(-MAX_HISTORY_LENGTH)
-      .map(msg => ({
-        role: msg.sender === 'user' ? 'user' : 'model',
-        parts: [{ text: typeof msg.text === 'string' ? msg.text : 'Structured message content.' }]
-      }));
+    const historyForAI: MessageHistoryItem[] = convertDisplayMessagesToHistoryItems(currentMessagesWithUser)
+      .slice(-MAX_HISTORY_FOR_AI);
 
     const aiInput: ChatInput = {
       query: trimmedInput,
@@ -268,6 +315,8 @@ export function AiChat() {
       activeBoardContext: prepareBoardContext(),
       userPreferences: prepareUserPreferences(),
     };
+
+    let newSessionId = activeSessionId; // Preserve current session ID
 
     try {
       const aiResponse: ChatOutput = await chatWithAI(aiInput);
@@ -277,16 +326,21 @@ export function AiChat() {
         sender: 'ai',
         text: aiResponse.response,
         timestamp: Date.now(),
-        toolCalls: aiResponse.toolCalls, // Include tool calls if any
+        toolCalls: aiResponse.toolCalls, 
       };
+      
+      const finalMessages = currentMessagesWithUser.map(msg => msg.id === thinkingMessageId ? aiResponseMessage : msg);
+      // If it's a system message (like a thinking indicator), it should already be replaced by the AI's actual response.
+      // So, currentMessagesWithUser already has user message, then we add aiResponseMessage which replaces the thinking one.
+      const updatedMessagesForSave = [...messages, userMessage, aiResponseMessage].filter(m => m.id !== thinkingMessageId);
 
-      setMessages(prevMessages => {
-          const updatedMessages = prevMessages.map(msg =>
-            msg.id === thinkingMessageId ? aiResponseMessage : msg
-          );
-          saveChatHistory(updatedMessages); // Save history after AI responds
-          return updatedMessages;
-      });
+      setMessages(updatedMessagesForSave);
+
+      // Save or update the session
+      newSessionId = await saveOrUpdateSession(updatedMessagesForSave, activeSessionId, activeSessionName);
+      if(newSessionId && newSessionId !== activeSessionId) {
+         setActiveSessionId(newSessionId); // Update state if a new session was created
+      }
 
 
       if (aiResponse.taskAction) {
@@ -295,9 +349,7 @@ export function AiChat() {
       if (aiResponse.preferenceUpdate) {
         handlePreferenceUpdate(aiResponse.preferenceUpdate);
       }
-      // Handle tool call results if needed (not fully implemented in this simplified version)
       if (aiResponse.toolCalls && aiResponse.toolCalls.length > 0) {
-        // For now, just log or display a system message about tool usage
         addSystemMessage(`Jack attempted to use a tool: ${aiResponse.toolCalls[0].name}. Tool execution response is not displayed in this version.`);
       }
 
@@ -314,7 +366,7 @@ export function AiChat() {
         const updatedWithError = prevMessages.map(msg =>
           msg.id === thinkingMessageId ? errorDisplayMessage : msg
         );
-        saveChatHistory(updatedWithError);
+        // No need to save error messages to history
         return updatedWithError;
       });
     } finally {
@@ -324,98 +376,113 @@ export function AiChat() {
     }
   };
 
-  if (isLoadingHistory) {
-    return (
-      <div className="flex flex-col h-full w-full items-center justify-center p-4">
-          <Loader2 className="h-8 w-8 animate-spin text-primary mb-4" />
-          <p className="text-muted-foreground">Loading chat...</p>
-      </div>
-    );
-  }
 
   return (
-    <Card className="flex flex-col h-full w-full shadow-2xl overflow-hidden rounded-xl">
-      <CardHeader className="border-b bg-card/80 backdrop-blur-md sticky top-0 z-10">
-        <CardTitle className="flex items-center gap-2 text-lg font-semibold">
-          <Bot className="h-6 w-6 text-primary" /> AI Assistant (Jack)
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="flex-1 p-0">
-        <ScrollArea className="h-full p-4 pt-6" ref={scrollAreaRef}>
-          <div className="space-y-6">
-            {messages.map((message) => (
-              <div
-                key={message.id}
-                className={cn(
-                  'flex items-end gap-3 animate-fadeInUp',
-                  message.sender === 'user' ? 'justify-end' : 'justify-start',
-                  message.sender === 'system' && 'justify-center',
-                  message.sender === 'tool_code' && 'justify-center my-2'
-                )}
-              >
-                {(message.sender === 'ai' || message.sender === 'tool_code') && message.sender !== 'system' && (
-                  <Avatar className="h-9 w-9 border-2 border-primary/50 shadow-md shrink-0">
-                     <AvatarFallback className="bg-primary/10"><Bot className="h-5 w-5 text-primary" /></AvatarFallback>
-                  </Avatar>
-                )}
-                 {message.sender === 'system' && (
-                   <div className="w-full flex justify-center">
-                    <div className="max-w-full sm:max-w-[80%] text-xs text-muted-foreground bg-muted/50 p-2 rounded-md shadow-sm flex items-center gap-2">
-                       <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0" />
-                       <span>{message.text}</span>
-                    </div>
-                   </div>
-                )}
-                {message.sender !== 'system' && (
-                    <div
-                    className={cn(
-                        'max-w-[85%] sm:max-w-[80%] rounded-2xl p-3.5 text-sm shadow-lg transition-all duration-300 ease-in-out hover:shadow-xl hover:scale-[1.01]',
-                        message.sender === 'user'
-                        ? 'bg-primary text-primary-foreground rounded-br-lg'
-                        : message.sender === 'tool_code'
-                        ? 'bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-200 border border-amber-300 dark:border-amber-700 rounded-lg w-full sm:w-auto'
-                        : 'bg-muted text-muted-foreground rounded-bl-lg dark:bg-neutral-700 dark:text-neutral-100'
-                    )}
-                    >
-                    {message.sender === 'tool_code' && typeof message.text === 'string' && (
-                        <pre className="whitespace-pre-wrap text-xs p-2 bg-black/5 dark:bg-white/5 rounded">
-                            <code>{message.text}</code>
-                        </pre>
-                    )}
-                    {message.sender !== 'tool_code' && typeof message.text === 'string' ? (
-                        <p className="whitespace-pre-wrap leading-relaxed break-words">{message.text}</p>
-                    ) : message.sender !== 'tool_code' ? (
-                        message.text
-                    ) : null}
-                    </div>
-                )}
-                 {message.sender === 'user' && (
-                  <Avatar className="h-9 w-9 border shadow-md shrink-0">
-                     <AvatarFallback><User className="h-5 w-5" /></AvatarFallback>
-                  </Avatar>
-                )}
-              </div>
-            ))}
-          </div>
-        </ScrollArea>
-      </CardContent>
-      <CardFooter className="p-3 sm:p-4 border-t bg-card/80 backdrop-blur-md sticky bottom-0 z-10">
-        <form onSubmit={handleSendMessage} className="flex w-full items-center space-x-2 sm:space-x-3">
-          <Input
-            ref={inputRef}
-            value={inputValue}
-            onChange={(e) => setInputValue(e.target.value)}
-            placeholder="Ask Jack..."
-            disabled={isLoading}
-            className="flex-1 h-10 sm:h-11 text-sm sm:text-base transition-shadow duration-200 focus:shadow-xl focus:border-primary/50 rounded-lg"
-            autoComplete="off"
-          />
-          <Button type="submit" size="icon" className="h-10 w-10 sm:h-11 sm:w-11 rounded-lg transition-all duration-150 ease-in-out hover:bg-primary/90 active:scale-95 shadow-md hover:shadow-lg" disabled={isLoading || !inputValue.trim()} >
-            <Send className="h-4 w-4 sm:h-5 sm:w-5" />
-            <span className="sr-only">Send message</span>
-          </Button>
-        </form>
-      </CardFooter>
+    <Card className="flex h-full w-full shadow-2xl overflow-hidden rounded-xl">
+       {/* Session List Sidebar */}
+      <div className="w-1/3 min-w-[250px] max-w-[320px] border-r border-border dark:border-neutral-700">
+        <AiChatSessionList
+          sessions={savedSessions}
+          currentUserId={currentUser?.id || null}
+          activeSessionId={activeSessionId}
+          onSelectSession={handleSelectSession}
+          onNewChat={handleNewChat}
+          onDeleteSession={handleDeleteCurrentSession}
+          isLoadingSessions={isLoadingSessions}
+        />
+      </div>
+
+      {/* Main Chat Area */}
+      <div className="flex flex-col flex-1">
+        <CardHeader className="border-b bg-card/80 backdrop-blur-md sticky top-0 z-10">
+          <CardTitle className="flex items-center gap-2 text-lg font-semibold">
+            <Bot className="h-6 w-6 text-primary" /> {activeSessionName || "AI Assistant (Jack)"}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="flex-1 p-0">
+            {isLoadingHistory ? (
+                 <div className="flex flex-col h-full w-full items-center justify-center p-4">
+                    <Loader2 className="h-8 w-8 animate-spin text-primary mb-4" />
+                    <p className="text-muted-foreground">Loading chat messages...</p>
+                </div>
+            ) : (
+          <ScrollArea className="h-full p-4 pt-6" ref={scrollAreaRef}>
+            <div className="space-y-6">
+              {messages.map((message) => (
+                <div
+                  key={message.id}
+                  className={cn(
+                    'flex items-end gap-3 animate-fadeInUp',
+                    message.sender === 'user' ? 'justify-end' : 'justify-start',
+                    message.sender === 'system' && 'justify-center',
+                    message.sender === 'tool_code' && 'justify-center my-2'
+                  )}
+                >
+                  {(message.sender === 'ai' || message.sender === 'tool_code') && message.sender !== 'system' && (
+                    <Avatar className="h-9 w-9 border-2 border-primary/50 shadow-md shrink-0">
+                       <AvatarFallback className="bg-primary/10"><Bot className="h-5 w-5 text-primary" /></AvatarFallback>
+                    </Avatar>
+                  )}
+                   {message.sender === 'system' && (
+                     <div className="w-full flex justify-center">
+                      <div className="max-w-full sm:max-w-[80%] text-xs text-muted-foreground bg-muted/50 p-2 rounded-md shadow-sm flex items-center gap-2">
+                         <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0" />
+                         <span>{message.text}</span>
+                      </div>
+                     </div>
+                  )}
+                  {message.sender !== 'system' && (
+                      <div
+                      className={cn(
+                          'max-w-[85%] sm:max-w-[80%] rounded-2xl p-3.5 text-sm shadow-lg transition-all duration-300 ease-in-out hover:shadow-xl hover:scale-[1.01]',
+                          message.sender === 'user'
+                          ? 'bg-primary text-primary-foreground rounded-br-lg'
+                          : message.sender === 'tool_code'
+                          ? 'bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-200 border border-amber-300 dark:border-amber-700 rounded-lg w-full sm:w-auto'
+                          : 'bg-muted text-muted-foreground rounded-bl-lg dark:bg-neutral-700 dark:text-neutral-100'
+                      )}
+                      >
+                      {message.sender === 'tool_code' && typeof message.text === 'string' && (
+                          <pre className="whitespace-pre-wrap text-xs p-2 bg-black/5 dark:bg-white/5 rounded">
+                              <code>{message.text}</code>
+                          </pre>
+                      )}
+                      {message.sender !== 'tool_code' && typeof message.text === 'string' ? (
+                          <p className="whitespace-pre-wrap leading-relaxed break-words">{message.text}</p>
+                      ) : message.sender !== 'tool_code' ? (
+                          message.text
+                      ) : null}
+                      </div>
+                  )}
+                   {message.sender === 'user' && (
+                    <Avatar className="h-9 w-9 border shadow-md shrink-0">
+                       <AvatarFallback><User className="h-5 w-5" /></AvatarFallback>
+                    </Avatar>
+                  )}
+                </div>
+              ))}
+            </div>
+          </ScrollArea>
+            )}
+        </CardContent>
+        <CardFooter className="p-3 sm:p-4 border-t bg-card/80 backdrop-blur-md sticky bottom-0 z-10">
+          <form onSubmit={handleSendMessage} className="flex w-full items-center space-x-2 sm:space-x-3">
+            <Input
+              ref={inputRef}
+              value={inputValue}
+              onChange={(e) => setInputValue(e.target.value)}
+              placeholder="Ask Jack..."
+              disabled={isLoading || isLoadingHistory}
+              className="flex-1 h-10 sm:h-11 text-sm sm:text-base transition-shadow duration-200 focus:shadow-xl focus:border-primary/50 rounded-lg"
+              autoComplete="off"
+            />
+            <Button type="submit" size="icon" className="h-10 w-10 sm:h-11 sm:w-11 rounded-lg transition-all duration-150 ease-in-out hover:bg-primary/90 active:scale-95 shadow-md hover:shadow-lg" disabled={isLoading || isLoadingHistory || !inputValue.trim()} >
+              <Send className="h-4 w-4 sm:h-5 sm:w-5" />
+              <span className="sr-only">Send message</span>
+            </Button>
+          </form>
+        </CardFooter>
+      </div>
     </Card>
   );
 }
