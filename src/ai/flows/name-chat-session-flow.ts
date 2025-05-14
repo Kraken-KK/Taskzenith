@@ -9,18 +9,10 @@
  */
 
 import { ai } from '@/ai/ai-instance';
-import { MessageSchema as MessageHistoryItemSchema } from '@/ai/schemas';
+import { NameChatSessionInputSchema, NameChatSessionOutputSchema } from '@/ai/schemas'; // Import specific schemas
 import { z } from 'genkit';
 
-const NameChatSessionInputSchema = z.object({
-  messagesPreview: z.array(MessageHistoryItemSchema).min(1).max(6)
-    .describe('A preview of the initial messages in the chat session (1 to 6 messages).'),
-});
 export type NameChatSessionInput = z.infer<typeof NameChatSessionInputSchema>;
-
-const NameChatSessionOutputSchema = z.object({
-  sessionName: z.string().describe('A concise and descriptive name for the chat session (max 5 words).'),
-});
 export type NameChatSessionOutput = z.infer<typeof NameChatSessionOutputSchema>;
 
 export async function nameChatSession(input: NameChatSessionInput): Promise<NameChatSessionOutput> {
@@ -29,8 +21,8 @@ export async function nameChatSession(input: NameChatSessionInput): Promise<Name
 
 const nameChatSessionPrompt = ai.definePrompt({
   name: 'nameChatSessionPrompt',
-  input: { schema: NameChatSessionInputSchema },
-  output: { schema: NameChatSessionOutputSchema },
+  input: { schema: NameChatSessionInputSchema }, // Use imported schema
+  output: { schema: NameChatSessionOutputSchema }, // Use imported schema
   prompt: `Based on the following initial messages from a chat session, generate a concise and descriptive name for the session (maximum 5 words).
 Focus on the main topic or the user's primary query.
 
@@ -43,11 +35,11 @@ Session Name:
 `,
 });
 
-const nameChatSessionFlow = ai.defineFlow(
+const nameChatSessionFlow = ai.defineFlow<NameChatSessionInput, NameChatSessionOutput>(
   {
     name: 'nameChatSessionFlow',
-    inputSchema: NameChatSessionInputSchema,
-    outputSchema: NameChatSessionOutputSchema,
+    inputSchema: NameChatSessionInputSchema, // Use imported schema
+    outputSchema: NameChatSessionOutputSchema, // Use imported schema
   },
   async (input) => {
     if (!input.messagesPreview || input.messagesPreview.length === 0) {

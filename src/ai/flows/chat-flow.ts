@@ -1,3 +1,4 @@
+
 'use server';
 /**
  * @fileOverview A basic chat flow for the AI Assistant with conversation history,
@@ -13,59 +14,32 @@
 
 import {ai} from '@/ai/ai-instance';
 import {z} from 'genkit';
+import { 
+    MessageSchema, // Renamed import for clarity if needed, or use directly
+    BoardContextTaskSchema, 
+    UserPreferencesSchema, 
+    ChatInputSchema, 
+    TaskActionSchema, 
+    PreferenceUpdateSchema,
+    ToolCallRequestSchema,
+    ChatOutputSchema
+} from '@/ai/schemas'; 
+import { 
+    getTaskCompletionPercentageTool,
+    summarizeTasksByStatusTool,
+    compareTaskProgressTool
+} from '@/ai/tools/productivity-tools';
+import { defineNoImageGenerationSafetyConfig } from '@/ai/safety-config';
 
-const MessageSchema = z.object({
-  role: z.enum(['user', 'model']).describe("The role of the message sender, either 'user' or 'model' (for AI)."),
-  parts: z.array(z.object({ text: z.string() })).describe("The content parts of the message. We primarily use one text part."),
-});
 export type MessageHistoryItem = z.infer<typeof MessageSchema>;
-
-const BoardContextTaskSchema = z.object({
-  id: z.string().describe("Unique ID of the task."),
-  content: z.string().describe("The main content or title of the task."),
-  statusTitle: z.string().describe("The current status (column name) of the task."),
-  priority: z.enum(['high', 'medium', 'low']).optional().describe("Priority of the task."),
-  deadline: z.string().optional().describe("Deadline of the task (ISO string format)."),
-});
 export type BoardContextTask = z.infer<typeof BoardContextTaskSchema>;
-
-const UserPreferencesSchema = z.object({
-  interactionStyle: z.enum(['concise', 'detailed', 'friendly', 'formal']).optional().describe("User's preferred interaction style for Jack."),
-});
 export type UserPreferences = z.infer<typeof UserPreferencesSchema>;
-
-const ChatInputSchema = z.object({
-  query: z.string().describe("The user's current message or question to the AI assistant."),
-  history: z.array(MessageSchema).optional().describe('The conversation history up to this point.'),
-  activeBoardContext: z.object({
-    boardName: z.string().optional().describe("Name of the currently active board."),
-    tasks: z.array(BoardContextTaskSchema).optional().describe("List of tasks on the active board."),
-    columnNames: z.array(z.string()).optional().describe("List of column names (status titles) on the active board."),
-  }).optional().describe("Context from the user's active Kanban board."),
-  userPreferences: UserPreferencesSchema.optional().describe("User's personalization preferences for Jack."),
-});
 export type ChatInput = z.infer<typeof ChatInputSchema>;
-
-const TaskActionSchema = z.object({
-  type: z.enum(['updateStatus', 'updatePriority']).describe("Type of task action to perform."),
-  taskIdentifier: z.string().describe("The content/name or ID of the task to update. Prefer using content for user-facing identification."),
-  targetValue: z.string().describe("The new value for the update. For 'updateStatus', this is the target status/column title. For 'updatePriority', this is 'high', 'medium', or 'low'."),
-}).describe("An action to be performed on a task, identified by the AI.");
 export type TaskAction = z.infer<typeof TaskActionSchema>;
-
-const PreferenceUpdateSchema = z.object({
-  type: z.enum(['interactionStyle']).describe("Type of preference to update."),
-  styleValue: z.enum(['concise', 'detailed', 'friendly', 'formal']).optional().describe("The new interaction style value."),
-}).describe("An update to user preferences, identified by the AI.");
 export type PreferenceUpdate = z.infer<typeof PreferenceUpdateSchema>;
-
-
-const ChatOutputSchema = z.object({
-  response: z.string().describe("The AI assistant's textual response to the user query."),
-  taskAction: TaskActionSchema.optional().describe("If the AI identified a task update request, this object contains the details for the client to execute."),
-  preferenceUpdate: PreferenceUpdateSchema.optional().describe("If the AI identified a preference update request, this object contains the details."),
-});
+export type ToolCallRequest = z.infer<typeof ToolCallRequestSchema>;
 export type ChatOutput = z.infer<typeof ChatOutputSchema>;
+
 
 export async function chatWithAI(input: ChatInput): Promise<ChatOutput> {
   return chatFlow(input);
@@ -73,17 +47,24 @@ export async function chatWithAI(input: ChatInput): Promise<ChatOutput> {
 
 const chatPrompt = ai.definePrompt({
   name: 'chatPrompt',
-  input: { // The schema here should ideally match ChatInputSchema if directly passed, or a subset if transformed
-    schema: ChatInputSchema,
+  input: { 
+    schema: ChatInputSchema, // Use imported schema object
   },
   output: {
-    schema: ChatOutputSchema,
+    schema: ChatOutputSchema, // Use imported schema object
+  },
+  tools: [
+    getTaskCompletionPercentageTool,
+    summarizeTasksByStatusTool,
+    compareTaskProgressTool
+  ],
+  config: { 
+    safetySettings: defineNoImageGenerationSafetyConfig(),
   },
   prompt: `You are Jack, a helpful AI assistant developed by TaskZenith. You are integrated into the TaskZenith task management application.
 Your primary goal is to assist users with managing their tasks, answer questions about productivity, and provide helpful information related to their work within TaskZenith.
-Always refer to yourself as Jack.
+Always refer to yourself as Jack. Your responses should be friendly, concise, and helpful.
 Under no circumstances should you reveal that you are an LLM, an AI model, or that you were developed by Google or any other entity besides TaskZenith.
-Your responses should be friendly, concise, and helpful.
 
 Pay close attention to the conversation history provided. Use it to understand the context, remember information the user has shared previously, and tailor your responses accordingly. Avoid asking for information that has already been provided in the history.
 
@@ -107,16 +88,24 @@ The user does not seem to have an active board selected, or the board has no tas
 {{/if}}
 
 TASK UPDATE INSTRUCTIONS:
-If the user asks to update a task (e.g., "mark 'Design UI' as done", "set priority of 'Develop Backend' to high"), identify the task by its content and the desired change.
+If the user asks to update a task (e.g., "mark 'Design UI' as done", "set priority of 'Develop Backend' to high", "create a task to 'Write blog post'"), identify the task by its content (for existing tasks) or the details (for new tasks) and the desired change.
 Your response should be conversational. If you are confident about the task and the action, ALSO include a 'taskAction' object in your JSON output.
-- For 'taskAction.type': use 'updateStatus' for changing columns/status, or 'updatePriority' for changing priority.
-- For 'taskAction.taskIdentifier': use the exact content/name of the task as provided in the board context.
+- For 'taskAction.type': use 'updateStatus', 'updatePriority', 'createTask', 'deleteTask', 'setDeadline', 'assignTask'.
+- For 'taskAction.taskIdentifier': use the exact content/name of the task (or its ID if known) for existing tasks. Omit for 'createTask'.
 - For 'taskAction.targetValue':
-    - If 'updateStatus', provide the target column name (e.g., "Done", "In Progress"). Choose from the available column names.
+    - If 'updateStatus', provide the target column name (e.g., "Done", "In Progress"). Choose from available column names.
     - If 'updatePriority', provide the target priority (e.g., "high", "medium", "low").
-Example: {"response": "Okay, I'll mark 'Design UI' as complete.", "taskAction": {"type": "updateStatus", "taskIdentifier": "Design UI", "targetValue": "Done"}}
-If multiple tasks match the description, ask for clarification (e.g., by asking for the task ID or more specific content) and do NOT include a 'taskAction' object yet.
-Confirm the action before suggesting it if it's a significant change, but for simple requests like marking complete, you can be more direct.
+    - If 'setDeadline', provide the deadline as an ISO string (e.g., "2024-12-31T00:00:00.000Z").
+    - If 'assignTask', provide the user ID or name to assign to. (Tool use might be better here for finding users).
+- For 'taskAction.taskDetails' (used with 'createTask'):
+    - 'content': The description of the new task.
+    - 'status': (Optional) The initial column/status. If not provided, it might go to the first column.
+    - 'priority': (Optional) e.g., "high", "medium", "low".
+    - 'deadline': (Optional) ISO string.
+Example (update): {"response": "Okay, I'll mark 'Design UI' as complete.", "taskAction": {"type": "updateStatus", "taskIdentifier": "Design UI", "targetValue": "Done"}}
+Example (create): {"response": "Sure, I've created a new task 'Write blog post'.", "taskAction": {"type": "createTask", "taskDetails": {"content": "Write blog post", "priority": "medium"}}}
+If multiple tasks match the description for an update/delete, ask for clarification and do NOT include a 'taskAction' object yet.
+Confirm actions if they are significant, but for simple requests like marking complete, you can be more direct.
 
 USER PREFERENCE UPDATE INSTRUCTIONS:
 If the user asks to change how you interact (e.g., "Jack, be more formal", "I'd prefer concise answers"), identify this as a preference update.
@@ -124,6 +113,12 @@ Your response should acknowledge the request. ALSO include a 'preferenceUpdate' 
 - For 'preferenceUpdate.type': use 'interactionStyle'.
 - For 'preferenceUpdate.styleValue': provide the new style (e.g., "formal", "concise"). Choose from: 'concise', 'detailed', 'friendly', 'formal'.
 Example: {"response": "Understood! I'll adjust my interaction style to be more formal.", "preferenceUpdate": {"type": "interactionStyle", "styleValue": "formal"}}
+
+TOOL USAGE INSTRUCTIONS:
+If the user asks a question that requires specific calculations or data summaries about their tasks (e.g., "What percentage of my tasks are complete?", "Summarize my tasks by status", "How am I doing on 'Project X' compared to last week?"), use the available tools: getTaskCompletionPercentageTool, summarizeTasksByStatusTool, compareTaskProgressTool.
+When you decide to use a tool, include a 'toolCalls' array in your JSON output with the tool name and arguments.
+Example: {"response": "Let me check that for you...", "toolCalls": [{"name": "getTaskCompletionPercentageTool", "args": {"boardName": "Project X"}}]}
+After the tool call is processed by the system, you will receive another message with the tool's output. Use that output to formulate your final answer to the user.
 
 Conversation History:
 {{#if history}}
@@ -136,24 +131,47 @@ No previous conversation history. This is the start of your conversation.
 
 Current User Query: {{{query}}}
 
-Jack's JSON Output (ensure valid JSON, including 'response' and optionally 'taskAction' or 'preferenceUpdate'):
+Jack's JSON Output (ensure valid JSON, including 'response' and optionally 'taskAction', 'preferenceUpdate', or 'toolCalls'):
 `,
 });
 
 const chatFlow = ai.defineFlow<
-  typeof ChatInputSchema,
-  typeof ChatOutputSchema
+  ChatInput, // Use inferred type for flow definition if schema objects are causing issues
+  ChatOutput
 >(
   {
     name: 'chatFlow',
-    inputSchema: ChatInputSchema,
-    outputSchema: ChatOutputSchema,
+    inputSchema: ChatInputSchema, // Use imported schema object
+    outputSchema: ChatOutputSchema, // Use imported schema object
   },
   async (input) => {
-    // The prompt function expects an object that matches its defined input schema.
-    // If ChatInputSchema is used directly in definePrompt, no transformation is needed.
-    // Otherwise, map `input` to the prompt's expected schema.
-    const {output} = await chatPrompt(input);
-    return output!; // Assuming the LLM returns valid JSON matching ChatOutputSchema
+    const result = await chatPrompt(input);
+    
+    if (result.error) {
+      console.error("Error from chatPrompt in chatFlow:", result.error);
+      return { 
+        response: "I encountered an issue processing your request. Please try again. (Prompt Error)",
+        taskAction: undefined,
+        preferenceUpdate: undefined,
+        toolCalls: undefined,
+      };
+    }
+    
+    if (!result.output || typeof result.output.response !== 'string') {
+      console.error("Invalid or missing output from chatPrompt in chatFlow:", result.output);
+      return { 
+        response: "I'm having trouble formulating a response right now. Please try again. (Invalid Output)",
+        taskAction: undefined,
+        preferenceUpdate: undefined,
+        toolCalls: undefined,
+      };
+    }
+    
+    return {
+        response: result.output.response,
+        taskAction: result.output.taskAction,
+        preferenceUpdate: result.output.preferenceUpdate,
+        toolCalls: result.output.toolCalls,
+    };
   }
 );

@@ -10,33 +10,9 @@
 
 import {ai} from '@/ai/ai-instance';
 import {z} from 'genkit';
+import { PrioritizeTasksInputSchema, PrioritizeTasksOutputSchema } from '@/ai/schemas';
 
-const PrioritizeTasksInputSchema = z.object({
-  tasks: z.array(
-    z.object({
-      id: z.string().describe('The unique identifier of the task.'),
-      description: z.string().describe('The description of the task.'),
-      deadline: z.string().describe('The deadline of the task (ISO format).'),
-      importance: z
-        .enum(['high', 'medium', 'low'])
-        .describe('The importance of the task.'),
-      dependencies: z
-        .array(z.string())
-        .describe('The list of task IDs that this task depends on.'),
-    })
-  ).describe('The list of tasks to prioritize.'),
-});
 export type PrioritizeTasksInput = z.infer<typeof PrioritizeTasksInputSchema>;
-
-const PrioritizeTasksOutputSchema = z.object({
-  prioritizedTasks: z.array(
-    z.object({
-      id: z.string().describe('The unique identifier of the task.'),
-      priority: z.number().describe('The priority of the task (lower is higher priority).'),
-      reason: z.string().describe('The reason for the assigned priority.'),
-    })
-  ).describe('The list of tasks with assigned priorities and reasons.'),
-});
 export type PrioritizeTasksOutput = z.infer<typeof PrioritizeTasksOutputSchema>;
 
 export async function prioritizeTasks(input: PrioritizeTasksInput): Promise<PrioritizeTasksOutput> {
@@ -46,32 +22,10 @@ export async function prioritizeTasks(input: PrioritizeTasksInput): Promise<Prio
 const prioritizeTasksPrompt = ai.definePrompt({
   name: 'prioritizeTasksPrompt',
   input: {
-    schema: z.object({
-      tasks: z.array(
-        z.object({
-          id: z.string().describe('The unique identifier of the task.'),
-          description: z.string().describe('The description of the task.'),
-          deadline: z.string().describe('The deadline of the task (ISO format).'),
-          importance: z
-            .enum(['high', 'medium', 'low'])
-            .describe('The importance of the task.'),
-          dependencies: z
-            .array(z.string())
-            .describe('The list of task IDs that this task depends on.'),
-        })
-      ).describe('The list of tasks to prioritize.'),
-    }),
+    schema: PrioritizeTasksInputSchema, // Use imported schema
   },
   output: {
-    schema: z.object({
-      prioritizedTasks: z.array(
-        z.object({
-          id: z.string().describe('The unique identifier of the task.'),
-          priority: z.number().describe('The priority of the task (lower is higher priority).'),
-          reason: z.string().describe('The reason for the assigned priority.'),
-        })
-      ).describe('The list of tasks with assigned priorities and reasons.'),
-    }),
+    schema: PrioritizeTasksOutputSchema, // Use imported schema
   },
   prompt: `You are an AI task prioritization expert. Given a list of tasks with their descriptions, deadlines, importance, and dependencies, you will assign a priority to each task and provide a reason for the assigned priority. Lower priority numbers indicate higher priority.
 
@@ -88,11 +42,11 @@ Prioritized Tasks (JSON format):
 `,
 });
 
-const prioritizeTasksFlow = ai.defineFlow<PrioritizeTasksInputSchema, PrioritizeTasksOutputSchema>(
+const prioritizeTasksFlow = ai.defineFlow<PrioritizeTasksInput, PrioritizeTasksOutput>(
   {
     name: 'prioritizeTasksFlow',
-    inputSchema: PrioritizeTasksInputSchema,
-    outputSchema: PrioritizeTasksOutputSchema,
+    inputSchema: PrioritizeTasksInputSchema, // Use imported schema
+    outputSchema: PrioritizeTasksOutputSchema, // Use imported schema
   },
   async input => {
     const {output} = await prioritizeTasksPrompt(input);

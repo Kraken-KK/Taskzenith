@@ -10,22 +10,9 @@
 
 import {ai} from '@/ai/ai-instance';
 import {z} from 'genkit';
+import { SmartTaskCreationInputSchema, SmartTaskCreationOutputSchema } from '@/ai/schemas';
 
-const SmartTaskCreationInputSchema = z.object({
-  userGoals: z
-    .string()
-    .describe('The user goals for which tasks need to be created.'),
-  currentProjects: z
-    .string()
-    .describe('The current projects the user is working on.'),
-});
 export type SmartTaskCreationInput = z.infer<typeof SmartTaskCreationInputSchema>;
-
-const SmartTaskCreationOutputSchema = z.object({
-  suggestedTasks: z
-    .array(z.string())
-    .describe('An array of suggested tasks based on the user goals and current projects.'),
-});
 export type SmartTaskCreationOutput = z.infer<typeof SmartTaskCreationOutputSchema>;
 
 export async function smartTaskCreation(input: SmartTaskCreationInput): Promise<SmartTaskCreationOutput> {
@@ -35,21 +22,10 @@ export async function smartTaskCreation(input: SmartTaskCreationInput): Promise<
 const prompt = ai.definePrompt({
   name: 'smartTaskCreationPrompt',
   input: {
-    schema: z.object({
-      userGoals: z
-        .string()
-        .describe('The user goals for which tasks need to be created.'),
-      currentProjects: z
-        .string()
-        .describe('The current projects the user is working on.'),
-    }),
+    schema: SmartTaskCreationInputSchema, // Use imported schema
   },
   output: {
-    schema: z.object({
-      suggestedTasks: z
-        .array(z.string())
-        .describe('An array of suggested tasks based on the user goals and current projects.'),
-    }),
+    schema: SmartTaskCreationOutputSchema, // Use imported schema
   },
   prompt: `You are a task suggestion AI. You will suggest tasks based on the user's goals and current projects. The tasks should be actionable and relevant to the user's goals and current projects.
 
@@ -60,12 +36,12 @@ Suggested Tasks:`,
 });
 
 const smartTaskCreationFlow = ai.defineFlow<
-  typeof SmartTaskCreationInputSchema,
-  typeof SmartTaskCreationOutputSchema
+  SmartTaskCreationInput,
+  SmartTaskCreationOutput
 >({
   name: 'smartTaskCreationFlow',
-  inputSchema: SmartTaskCreationInputSchema,
-  outputSchema: SmartTaskCreationOutputSchema,
+  inputSchema: SmartTaskCreationInputSchema, // Use imported schema
+  outputSchema: SmartTaskCreationOutputSchema, // Use imported schema
 }, async input => {
   const {output} = await prompt(input);
   return output!;
