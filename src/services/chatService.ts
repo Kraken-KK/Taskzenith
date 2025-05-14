@@ -100,7 +100,16 @@ export const sendMessage = async (
       createdAt: serverTimestamp() as Timestamp,
     };
     if (poll) {
-      newMessageData.poll = poll;
+      // Ensure poll options have an empty voterIds array if not provided
+      const sanitizedPoll: Poll = {
+        ...poll,
+        options: poll.options.map(opt => ({
+          ...opt,
+          voterIds: opt.voterIds || [] 
+        })),
+        createdAt: poll.createdAt || formatISO(new Date()) // Ensure createdAt is set
+      };
+      newMessageData.poll = sanitizedPoll;
     }
     await addDoc(messagesColRef, newMessageData);
 
@@ -134,44 +143,43 @@ export const voteOnPoll = async (
     await runTransaction(db, async (transaction) => {
       const messageSnap = await transaction.get(messageRef);
       if (!messageSnap.exists()) {
-        throw new Error("Message not found");
+        throw new Error("Message with the poll not found.");
       }
 
       const messageData = messageSnap.data() as ChatMessage;
       if (!messageData.poll) {
-        throw new Error("Poll not found in this message");
+        throw new Error("Poll not found in this message.");
       }
 
       const currentPoll = messageData.poll;
+      let userAlreadyVotedForThisOption = false;
+
       const newOptions = currentPoll.options.map(opt => {
-        let newVoterIds = [...opt.voterIds];
-        // Remove user's vote from any other option
-        if (opt.id !== optionId && newVoterIds.includes(userId)) {
-          newVoterIds = newVoterIds.filter(voter => voter !== userId);
-        }
-        // Add or remove vote for the selected option
-        if (opt.id === optionId) {
+        let newVoterIds = [...(opt.voterIds || [])]; // Ensure voterIds is an array
+
+        if (opt.id === optionId) { // This is the option the user clicked
           if (newVoterIds.includes(userId)) {
-            // User is un-voting (not typical for basic polls, but can be supported)
-            // For this implementation, let's assume clicking again does nothing or re-affirms.
-            // To allow un-voting: newVoterIds = newVoterIds.filter(voter => voter !== userId);
+            // User is trying to un-vote (or re-vote for the same)
+            // For simplicity, let's allow re-voting for the same (no change) or un-voting
+            // newVoterIds = newVoterIds.filter(voter => voter !== userId); // To allow un-voting
+            userAlreadyVotedForThisOption = true; // Mark that user had already voted for this
           } else {
-            newVoterIds.push(userId);
+            newVoterIds.push(userId); // Add user's vote
+          }
+        } else {
+          // This is not the option the user clicked, so remove their vote if it exists
+          if (newVoterIds.includes(userId)) {
+            newVoterIds = newVoterIds.filter(voter => voter !== userId);
           }
         }
         return { ...opt, voterIds: newVoterIds };
       });
       
-      // Ensure user is only in one voterIds list
-      const finalOptions = newOptions.map(opt => {
-          if (opt.id !== optionId && opt.voterIds.includes(userId)) {
-              return { ...opt, voterIds: opt.voterIds.filter(vID => vID !== userId) };
-          }
-          return opt;
-      });
+      // If user clicked an option they hadn't voted for, and they had voted for another,
+      // the above loop already removed their old vote.
+      // If they clicked the same option they already voted for, no change in voterIds array.
 
-
-      transaction.update(messageRef, { poll: { ...currentPoll, options: finalOptions } });
+      transaction.update(messageRef, { poll: { ...currentPoll, options: newOptions } });
     });
   } catch (error) {
     console.error("Error voting on poll:", error);
@@ -192,15 +200,21 @@ export const getChatRoomMessagesStream = (
     (querySnapshot) => {
       const messages = querySnapshot.docs.map(docSnap => {
         const data = docSnap.data();
+        const pollData = data.poll ? {
+          ...data.poll,
+          createdAt: (data.poll.createdAt as Timestamp)?.toDate 
+                       ? formatISO((data.poll.createdAt as Timestamp).toDate()) 
+                       : (typeof data.poll.createdAt === 'string' ? data.poll.createdAt : formatISO(new Date())),
+          options: Array.isArray(data.poll.options) 
+                     ? data.poll.options.map((opt: any) => ({...opt, voterIds: Array.isArray(opt.voterIds) ? opt.voterIds : [] }))
+                     : [],
+        } : undefined;
+
         return {
           id: docSnap.id,
           ...data,
           createdAt: (data.createdAt as Timestamp)?.toDate ? formatISO((data.createdAt as Timestamp).toDate()) : formatISO(new Date()),
-          poll: data.poll ? { // Ensure poll data is correctly typed
-            ...data.poll,
-            createdAt: (data.poll.createdAt as Timestamp)?.toDate ? formatISO((data.poll.createdAt as Timestamp).toDate()) : (typeof data.poll.createdAt === 'string' ? data.poll.createdAt : formatISO(new Date())),
-            options: data.poll.options.map((opt: any) => ({...opt, voterIds: Array.isArray(opt.voterIds) ? opt.voterIds : [] }))
-          } : undefined,
+          poll: pollData,
         } as ChatMessage;
       });
       callback(messages);

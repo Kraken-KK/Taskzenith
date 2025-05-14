@@ -13,7 +13,7 @@ import { Send, User, Loader2, MessageSquare, ArrowLeft, BarChart3, CheckCircle }
 import { cn } from '@/lib/utils';
 import { format, parseISO, isToday, isYesterday } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
-import { CreatePollDialog } from './CreatePollDialog'; // Import CreatePollDialog
+import { CreatePollDialog } from './CreatePollDialog'; 
 import { Progress } from '@/components/ui/progress';
 
 interface MessageAreaProps {
@@ -27,6 +27,7 @@ export function MessageArea({ chatRoom, currentUser, onBack }: MessageAreaProps)
   const [newMessage, setNewMessage] = useState('');
   const [isLoadingMessages, setIsLoadingMessages] = useState(true);
   const [isSending, setIsSending] = useState(false);
+  const [votingState, setVotingState] = useState<{ [messageId: string]: boolean }>({});
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
@@ -45,7 +46,7 @@ export function MessageArea({ chatRoom, currentUser, onBack }: MessageAreaProps)
     if (scrollAreaRef.current) {
       const scrollViewport = scrollAreaRef.current.querySelector('div[data-radix-scroll-area-viewport]');
       if (scrollViewport) {
-        setTimeout(() => { // Add a small delay to ensure DOM is updated
+        setTimeout(() => { 
             scrollViewport.scrollTo({ top: scrollViewport.scrollHeight, behavior: 'smooth' });
         }, 100);
       }
@@ -84,22 +85,25 @@ export function MessageArea({ chatRoom, currentUser, onBack }: MessageAreaProps)
   };
   
   const handleCreatePollSubmit = (poll: Poll, pollMessageText: string) => {
-    setNewMessage(pollMessageText); // Set the message text, can be overridden by user or be the poll question
-    // The actual sending will happen through a modified handleSendMessage or a new dedicated function
-    // For now, we'll rely on the user to press send after the dialog sets the poll data.
-    // A better approach would be to directly call sendMessage from here.
-    handleSendMessage(undefined, poll);
-    toast({ title: "Poll Ready", description: "Poll created and attached. Send your message." });
+    // Directly send the message with the poll data.
+    // The pollMessageText is used as the `text` part of the ChatMessage.
+    handleSendMessage(undefined, poll); 
+    // No need to setNewMessage here as handleSendMessage will clear it if successful.
+    // toast({ title: "Poll Created", description: "Your poll has been sent." }); // Optional: toast can be in handleSendMessage success
   };
 
   const handleVote = async (messageId: string, optionId: string) => {
     if (!currentUser) return;
+    setVotingState(prev => ({ ...prev, [messageId]: true }));
     try {
       await voteOnPoll(chatRoom.id, messageId, optionId, currentUser.id);
-      toast({title: "Vote Cast!", description: "Your vote has been recorded."});
+      // Toast is optional, as UI will update via stream
+      // toast({title: "Vote Cast!", description: "Your vote has been recorded."});
     } catch (error) {
       console.error("Error voting on poll:", error);
-      toast({title: "Vote Error", description: "Could not cast your vote.", variant: "destructive"});
+      toast({title: "Vote Error", description: `Could not cast your vote. ${error instanceof Error ? error.message : ''}`, variant: "destructive"});
+    } finally {
+      setVotingState(prev => ({ ...prev, [messageId]: false }));
     }
   };
 
@@ -107,12 +111,12 @@ export function MessageArea({ chatRoom, currentUser, onBack }: MessageAreaProps)
     try {
       const date = parseISO(isoString);
       if (isToday(date)) {
-        return format(date, 'p'); // e.g., 2:30 PM
+        return format(date, 'p'); 
       }
       if (isYesterday(date)) {
         return `Yesterday, ${format(date, 'p')}`;
       }
-      return format(date, 'MMM d, p'); // e.g., Aug 15, 2:30 PM
+      return format(date, 'MMM d, p'); 
     } catch (error) {
       console.warn("Error formatting date:", isoString, error);
       return "Invalid date";
@@ -122,40 +126,43 @@ export function MessageArea({ chatRoom, currentUser, onBack }: MessageAreaProps)
   const PollDisplay = ({ msg }: { msg: ChatMessage }) => {
     if (!msg.poll) return null;
     const poll = msg.poll;
-    const totalVotes = poll.options.reduce((sum, opt) => sum + opt.voterIds.length, 0);
-    const userVote = poll.options.find(opt => opt.voterIds.includes(currentUser.id));
+    const totalVotes = poll.options.reduce((sum, opt) => sum + (opt.voterIds?.length || 0), 0);
+    const userVote = poll.options.find(opt => opt.voterIds?.includes(currentUser.id));
+    const isCurrentlyVoting = votingState[msg.id];
 
     return (
         <div className="mt-2 p-3 border rounded-md bg-background/30 dark:bg-neutral-700/50">
             <p className="font-semibold text-sm mb-2">{poll.question}</p>
-            <div className="space-y-2">
+            <div className="space-y-2.5">
                 {poll.options.map(option => {
-                    const voteCount = option.voterIds.length;
+                    const voteCount = option.voterIds?.length || 0;
                     const percentage = totalVotes > 0 ? (voteCount / totalVotes) * 100 : 0;
                     const hasVotedForThis = userVote?.id === option.id;
                     return (
                         <div key={option.id}>
                             <div className="flex justify-between items-center text-xs mb-0.5">
-                                <span>{option.text}</span>
-                                <span>{voteCount} vote{voteCount === 1 ? '' : 's'} ({percentage.toFixed(0)}%)</span>
+                                <span className="truncate mr-2">{option.text}</span>
+                                <span className="whitespace-nowrap">{voteCount} vote{voteCount === 1 ? '' : 's'} ({percentage.toFixed(0)}%)</span>
                             </div>
-                            <Progress value={percentage} className="h-2 mb-1" />
+                            <Progress value={percentage} className="h-2 mb-1.5" />
                             <Button 
                                 variant={hasVotedForThis ? "default" : "outline"} 
                                 size="sm" 
                                 className="w-full text-xs h-7"
                                 onClick={() => handleVote(msg.id, option.id)}
-                                disabled={isLoadingMessages || isSending} // Potentially add a specific loading state for voting
+                                disabled={isCurrentlyVoting}
                             >
-                                {hasVotedForThis && <CheckCircle className="mr-1.5 h-3.5 w-3.5" />}
+                                {isCurrentlyVoting && hasVotedForThis ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : 
+                                 hasVotedForThis && <CheckCircle className="mr-1.5 h-3.5 w-3.5" />
+                                }
                                 {hasVotedForThis ? "Voted" : "Vote"}
                             </Button>
                         </div>
                     );
                 })}
             </div>
-            <p className="text-[10px] text-muted-foreground mt-2">
-                Poll created by {poll.createdBy === currentUser.id ? "You" : messages.find(m => m.id === msg.id)?.senderDisplayName || "User"} on {formatMessageTimestamp(poll.createdAt)}.
+            <p className="text-[10px] text-muted-foreground mt-2.5">
+                Poll created by {msg.senderId === currentUser.id ? "You" : msg.senderDisplayName || "User"} on {formatMessageTimestamp(poll.createdAt)}.
             </p>
         </div>
     );
@@ -259,7 +266,7 @@ export function MessageArea({ chatRoom, currentUser, onBack }: MessageAreaProps)
             className="flex-1 h-9 sm:h-10 text-sm rounded-lg transition-shadow duration-200 focus:shadow-lg"
             autoComplete="off"
           />
-          <Button type="submit" size="icon" disabled={isSending || (!newMessage.trim() && !messages.find(m => m.poll && !m.text)) || isLoadingMessages} className="rounded-lg h-9 w-9 sm:h-10 sm:w-10 shrink-0">
+          <Button type="submit" size="icon" disabled={isSending || (!newMessage.trim()) || isLoadingMessages} className="rounded-lg h-9 w-9 sm:h-10 sm:w-10 shrink-0">
             {isSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
             <span className="sr-only">Send</span>
           </Button>
