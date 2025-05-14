@@ -80,6 +80,7 @@ const defaultUserSettings = {
 
 const defaultAiChatHistory = {
   messages: [] as MessageHistoryItem[],
+  lastUpdatedAt: serverTimestamp() as Timestamp, // Ensure lastUpdatedAt is part of the default
 };
 
 
@@ -189,12 +190,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           boards: [defaultBoard],
           activeBoardId: defaultBoard.id,
           settings: defaultUserSettings,
-          aiChatHistory: defaultAiChatHistory, // Initialize with new structure
+          aiChatHistory: defaultAiChatHistory,
           boardGroups: [] as BoardGroup[],
           organizationMemberships: [],
           teamMemberships: [],
           defaultOrganizationId: null,
-          chatRoomIds: [], // Initialize chatRoomIds for new user
+          chatRoomIds: [],
         };
         console.log(`Firestore Init: Data for new user ${appUser.id}:`, JSON.stringify(newUserDocumentData, null, 2));
         await setDoc(userDocRef, newUserDocumentData);
@@ -239,11 +240,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           updates.settings = defaultUserSettings;
           needsUpdate = true;
         }
-        // Ensure aiChatHistory field exists with the correct structure
-        if (!userData.aiChatHistory || typeof userData.aiChatHistory.messages === 'undefined') {
-          updates.aiChatHistory = defaultAiChatHistory;
-          needsUpdate = true;
+        
+        // Robust aiChatHistory initialization/migration
+        let currentAiChatHistory = userData.aiChatHistory;
+        let aiHistoryNeedsUpdate = false;
+        if (!currentAiChatHistory || typeof currentAiChatHistory !== 'object') {
+          currentAiChatHistory = { messages: [] as MessageHistoryItem[], lastUpdatedAt: serverTimestamp() as Timestamp };
+          aiHistoryNeedsUpdate = true;
+        } else {
+          if (!Array.isArray(currentAiChatHistory.messages)) {
+            currentAiChatHistory.messages = [] as MessageHistoryItem[];
+            aiHistoryNeedsUpdate = true;
+          }
+          if (typeof currentAiChatHistory.lastUpdatedAt === 'undefined') {
+            currentAiChatHistory.lastUpdatedAt = serverTimestamp() as Timestamp;
+            aiHistoryNeedsUpdate = true;
+          }
         }
+        if (aiHistoryNeedsUpdate) {
+          updates.aiChatHistory = currentAiChatHistory;
+          needsUpdate = true;
+          console.log(`Firestore Init: User ${appUser.id} - aiChatHistory field was missing or malformed. Repaired/Initialized.`);
+        }
+
         if (!userData.boardGroups || !Array.isArray(userData.boardGroups)) {
           updates.boardGroups = [];
           needsUpdate = true;
@@ -260,7 +279,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           updates.defaultOrganizationId = null;
           needsUpdate = true;
         }
-        if (!userData.chatRoomIds || !Array.isArray(userData.chatRoomIds)) { // Check for chatRoomIds
+        if (!userData.chatRoomIds || !Array.isArray(userData.chatRoomIds)) { 
           updates.chatRoomIds = [];
           needsUpdate = true;
         }
@@ -918,3 +937,5 @@ export function useAuth() {
   }
   return context;
 }
+
+    
