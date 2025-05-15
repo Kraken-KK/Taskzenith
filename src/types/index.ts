@@ -22,9 +22,9 @@ export interface Task {
   content: string;
   status: string; // Column ID this task belongs to
   priority: 'high' | 'medium' | 'low';
-  deadline?: string; // ISO string format recommended
+  deadline?: string | null; // ISO string format recommended or null
   dependencies: string[]; // Array of task IDs this task depends on
-  description?: string; // More detailed description
+  description?: string | null; // More detailed description or null
   tags: string[]; // Task tags
   checklist: ChecklistItem[]; // Checklists
   createdAt: string; // ISO string format for task creation time
@@ -50,6 +50,7 @@ export interface Board {
   organizationId?: string | null; // For associating with an organization
   teamId?: string | null; // For associating with a team
   isPublic: boolean;
+  ownerId?: string; // User ID of the board creator, especially for shared boards
 }
 
 // Define the structure of a Board Group
