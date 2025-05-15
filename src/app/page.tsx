@@ -22,7 +22,7 @@ import { SettingsView } from '@/components/settings-view';
 import { PrioritizeTasksView } from '@/components/prioritize-tasks-view';
 import { SmartTaskCreationView } from '@/components/smart-task-creation-view';
 import { ChatLayout } from '@/components/chat/ChatLayout';
-import { Bot, CheckSquare, ListTodo, Settings, Star, Menu, FolderKanban, PlusCircle, Edit3, Trash2, Palette, LogOut, Database, Zap, User, Chrome, FolderPlus, FolderSymlink, Folders, Users, Building, Briefcase, MessageSquare, LogIn, MoreVertical } from "lucide-react";
+import { Bot, CheckSquare, ListTodo, Settings, Star, Menu, FolderKanban, PlusCircle, Edit3, Trash2, Palette, LogOut, Database, Zap, User, Chrome, FolderPlus, FolderSymlink, Folders, Users, Building, Briefcase, MessageSquare, LogIn, MoreVertical, UserPlus } from "lucide-react";
 import { useSidebar } from '@/components/ui/sidebar';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -71,7 +71,7 @@ type ActiveView = 'board' | 'ai-assistant' | 'prioritize' | 'smart-create' | 'se
 export default function Home() {
   const {
     currentUser, loading: authLoading, logout, currentProvider, isGuest, exitGuestMode,
-    createOrganization, createTeam, getUserOrganizations, getUserTeams, setCurrentOrganization, joinOrganizationByInviteCode
+    createOrganization, createTeam, getUserOrganizations, getUserTeams, setCurrentOrganization, joinOrganizationByInviteCode, joinTeam
   } = useAuth();
   const router = useRouter();
   const [activeView, setActiveView] = useState<ActiveView>('board');
@@ -79,7 +79,7 @@ export default function Home() {
   const isMobile = useIsMobile();
 
   const {
-    boards, activeBoardId, setActiveBoardId, getActiveBoard, deleteBoard, addBoard: addTaskBoard, // Renamed to avoid conflict
+    boards, activeBoardId, setActiveBoardId, getActiveBoard, deleteBoard, addBoard: addTaskBoard, 
     boardGroups, addBoardGroup, deleteBoardGroup, updateBoardGroupName, addBoardToGroup, removeBoardFromGroup, updateBoardGroupId
   } = useTasks();
   const { toast } = useToast();
@@ -119,11 +119,13 @@ export default function Home() {
         const orgs = await getUserOrganizations();
         setUserOrganizations(orgs);
         if (currentUser.defaultOrganizationId) {
-            const teams = await getUserTeams(currentUser.defaultOrganizationId);
-            setUserTeams(teams);
-        } else if (orgs.length > 0) { // If no default, maybe fetch for the first org? Or none?
-             const teams = await getUserTeams(orgs[0].id); // Example: fetch for first org
-             setUserTeams(teams);
+            // Fetch all teams for the default organization
+            const teamsInDefaultOrg = await getUserTeams(currentUser.defaultOrganizationId);
+            setUserTeams(teamsInDefaultOrg);
+        } else if (orgs.length > 0) {
+             // If no default, maybe fetch for the first org? Or none?
+             const teamsInFirstOrg = await getUserTeams(orgs[0].id); 
+             setUserTeams(teamsInFirstOrg);
         } else {
             setUserTeams([]);
         }
@@ -255,6 +257,17 @@ export default function Home() {
     }
   };
 
+  const handleJoinTeamAttempt = async (teamId: string, teamName: string) => {
+    if (!currentUser) return;
+    const success = await joinTeam(teamId);
+    if (success) {
+      toast({ title: "Joined Team", description: `You have successfully joined "${teamName}".`});
+      fetchUserOrgsAndTeams(); // Re-fetch to update UI if needed
+    } else {
+      // Toast for failure is handled within joinTeam
+    }
+  };
+
 
   return (
     <div className="flex h-screen bg-background text-foreground animate-fadeIn">
@@ -296,9 +309,10 @@ export default function Home() {
                       <DropdownMenuItem
                         key={org.id}
                         onClick={() => handleSetCurrentOrg(org.id)}
-                        className={cn(org.id === currentUser.defaultOrganizationId && "bg-accent text-accent-foreground")}
+                        className={cn("flex justify-between items-center", org.id === currentUser.defaultOrganizationId && "bg-accent text-accent-foreground")}
                       >
-                        {org.name} {org.id === currentUser.defaultOrganizationId && "(Active)"}
+                        <span>{org.name}</span>
+                        {org.id === currentUser.defaultOrganizationId && <CheckSquare className="h-4 w-4 text-primary" title="Active Organization"/>}
                       </DropdownMenuItem>
                     ))}
                      <DropdownMenuSeparator />
@@ -332,11 +346,21 @@ export default function Home() {
                     </DropdownMenuLabel>
                     <DropdownMenuSeparator />
                     {userTeams.length === 0 && <DropdownMenuItem disabled>No teams in this org yet.</DropdownMenuItem>}
-                    {userTeams.map(team => (
-                      <DropdownMenuItem key={team.id} >
-                        {team.name}
-                      </DropdownMenuItem>
-                    ))}
+                    {userTeams.map(team => {
+                      const isMember = team.memberIds.includes(currentUser.id);
+                      return (
+                        <DropdownMenuItem key={team.id} className="flex justify-between items-center">
+                          <span>{team.name}</span>
+                          {isMember ? (
+                            <CheckSquare className="h-4 w-4 text-green-500" title="You are a member"/>
+                          ) : (
+                            <Button variant="ghost" size="xs" className="h-6 px-1.5 text-xs" onClick={(e) => {e.stopPropagation(); handleJoinTeamAttempt(team.id, team.name);}}>
+                               <UserPlus className="mr-1 h-3 w-3"/> Join
+                            </Button>
+                          )}
+                        </DropdownMenuItem>
+                      );
+                    })}
                     <DropdownMenuSeparator />
                     <DropdownMenuItem onClick={() => { if(currentUser.defaultOrganizationId) handleOpenCreateTeamDialog(currentUser.defaultOrganizationId);}}>
                       <PlusCircle className="mr-2 h-4 w-4" /> Create New Team
@@ -736,11 +760,21 @@ export default function Home() {
                 <p>No teams in this organization yet.</p>
               ) : (
                 <ul className="space-y-2">
-                  {userTeams.map(team => (
-                    <li key={team.id} className="p-3 border rounded-md shadow-sm">
-                      {team.name}
-                    </li>
-                  ))}
+                  {userTeams.map(team => {
+                    const isMember = team.memberIds.includes(currentUser.id);
+                    return (
+                      <li key={team.id} className="p-3 border rounded-md shadow-sm flex justify-between items-center">
+                        <span>{team.name}</span>
+                        {isMember ? (
+                          <Badge variant="secondary" className="text-xs">Member</Badge>
+                        ) : (
+                          <Button variant="outline" size="sm" onClick={() => handleJoinTeamAttempt(team.id, team.name)}>
+                            <UserPlus className="mr-1 h-3 w-3" /> Join Team
+                          </Button>
+                        )}
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
               <Button onClick={() => currentUser.defaultOrganizationId && handleOpenCreateTeamDialog(currentUser.defaultOrganizationId)} className="mt-4">
