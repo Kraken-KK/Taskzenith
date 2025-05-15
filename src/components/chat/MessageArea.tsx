@@ -1,20 +1,22 @@
+
 // src/components/chat/MessageArea.tsx
 'use client';
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import type { ChatRoom, ChatMessage, Poll } from '@/types';
+import type { ChatRoom, ChatMessage, Poll, FileInfo } from '@/types';
 import type { AppUser } from '@/contexts/AuthContext';
 import { sendMessage, getChatRoomMessagesStream, voteOnPoll } from '@/services/chatService';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Send, User, Loader2, MessageSquare, ArrowLeft, BarChart3, CheckCircle } from 'lucide-react';
+import { Send, User, Loader2, MessageSquare, ArrowLeft, BarChart3, CheckCircle, Paperclip, FileText, Image as ImageIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { format, parseISO, isToday, isYesterday } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
 import { CreatePollDialog } from './CreatePollDialog'; 
 import { Progress } from '@/components/ui/progress';
+import Image from 'next/image';
 
 interface MessageAreaProps {
   chatRoom: ChatRoom;
@@ -30,8 +32,12 @@ export function MessageArea({ chatRoom, currentUser, onBack }: MessageAreaProps)
   const [votingState, setVotingState] = useState<{ [messageId: string]: boolean }>({});
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
   const [isCreatePollDialogOpen, setIsCreatePollDialogOpen] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedFilePreview, setSelectedFilePreview] = useState<string | null>(null);
+
 
   useEffect(() => {
     setIsLoadingMessages(true);
@@ -65,16 +71,46 @@ export function MessageArea({ chatRoom, currentUser, onBack }: MessageAreaProps)
     return chatRoom.name || 'Group Chat';
   }, [chatRoom, currentUser.id]);
 
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      setSelectedFile(file);
+      if (file.type.startsWith('image/')) {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          setSelectedFilePreview(reader.result as string);
+        };
+        reader.readAsDataURL(file);
+      } else {
+        setSelectedFilePreview(null);
+      }
+    }
+  };
 
   const handleSendMessage = async (e?: React.FormEvent<HTMLFormElement>, pollData?: Poll) => {
     e?.preventDefault();
     const textToSend = newMessage.trim();
-    if ((!textToSend && !pollData) || !currentUser.displayName || isSending) return;
+    if ((!textToSend && !pollData && !selectedFile) || !currentUser.displayName || isSending) return;
 
     setIsSending(true);
+    let fileInfoToSend: FileInfo | undefined = undefined;
+    if (selectedFile) {
+      fileInfoToSend = {
+        name: selectedFile.name,
+        type: selectedFile.type,
+        size: selectedFile.size,
+        placeholderUrl: selectedFile.type.startsWith('image/') ? selectedFilePreview || undefined : undefined,
+      };
+    }
+
     try {
-      await sendMessage(chatRoom.id, currentUser.id, currentUser.displayName, textToSend, pollData);
+      await sendMessage(chatRoom.id, currentUser.id, currentUser.displayName, textToSend, pollData, fileInfoToSend);
       setNewMessage('');
+      setSelectedFile(null);
+      setSelectedFilePreview(null);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ''; // Reset file input
+      }
     } catch (error) {
       console.error("Error sending message:", error);
       toast({ title: "Send Error", description: "Could not send your message.", variant: "destructive"});
@@ -85,11 +121,7 @@ export function MessageArea({ chatRoom, currentUser, onBack }: MessageAreaProps)
   };
   
   const handleCreatePollSubmit = (poll: Poll, pollMessageText: string) => {
-    // Directly send the message with the poll data.
-    // The pollMessageText is used as the `text` part of the ChatMessage.
     handleSendMessage(undefined, poll); 
-    // No need to setNewMessage here as handleSendMessage will clear it if successful.
-    // toast({ title: "Poll Created", description: "Your poll has been sent." }); // Optional: toast can be in handleSendMessage success
   };
 
   const handleVote = async (messageId: string, optionId: string) => {
@@ -97,8 +129,6 @@ export function MessageArea({ chatRoom, currentUser, onBack }: MessageAreaProps)
     setVotingState(prev => ({ ...prev, [messageId]: true }));
     try {
       await voteOnPoll(chatRoom.id, messageId, optionId, currentUser.id);
-      // Toast is optional, as UI will update via stream
-      // toast({title: "Vote Cast!", description: "Your vote has been recorded."});
     } catch (error) {
       console.error("Error voting on poll:", error);
       toast({title: "Vote Error", description: `Could not cast your vote. ${error instanceof Error ? error.message : ''}`, variant: "destructive"});
@@ -121,6 +151,14 @@ export function MessageArea({ chatRoom, currentUser, onBack }: MessageAreaProps)
       console.warn("Error formatting date:", isoString, error);
       return "Invalid date";
     }
+  };
+
+  const formatFileSize = (bytes: number): string => {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
   
   const PollDisplay = ({ msg }: { msg: ChatMessage }) => {
@@ -165,6 +203,44 @@ export function MessageArea({ chatRoom, currentUser, onBack }: MessageAreaProps)
                 Poll created by {msg.senderId === currentUser.id ? "You" : msg.senderDisplayName || "User"} on {formatMessageTimestamp(poll.createdAt)}.
             </p>
         </div>
+    );
+  };
+
+  const FileDisplay = ({ msg }: { msg: ChatMessage }) => {
+    if (!msg.fileInfo) return null;
+    const { name, type, size, placeholderUrl } = msg.fileInfo;
+
+    return (
+      <div className="mt-2 p-3 border rounded-md bg-background/40 dark:bg-neutral-700/60">
+        <div className="flex items-center gap-2 mb-1">
+          {type.startsWith('image/') && placeholderUrl ? (
+            <ImageIcon className="h-5 w-5 text-primary shrink-0" />
+          ) : (
+            <FileText className="h-5 w-5 text-muted-foreground shrink-0" />
+          )}
+          <p className="font-medium text-sm truncate flex-1">{name}</p>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          {type} - {formatFileSize(size)}
+        </p>
+        {type.startsWith('image/') && placeholderUrl && (
+          <div className="mt-2 max-w-xs max-h-48 overflow-hidden rounded">
+            <Image
+              src={placeholderUrl}
+              alt={`Preview of ${name}`}
+              width={200}
+              height={200}
+              className="object-contain w-full h-full"
+            />
+          </div>
+        )}
+        {/* Placeholder for download button or transfer status in future P2P implementation */}
+        {/* <Button variant="link" size="sm" className="mt-1 p-0 h-auto text-xs">Download</Button> */}
+        <p className="text-[10px] text-muted-foreground mt-1.5">
+            File shared by {msg.senderId === currentUser.id ? "You" : msg.senderDisplayName || "User"}.
+            <br/> (Note: P2P transfer not yet implemented. This is a metadata placeholder.)
+        </p>
+      </div>
     );
   };
 
@@ -224,6 +300,7 @@ export function MessageArea({ chatRoom, currentUser, onBack }: MessageAreaProps)
                 >
                   {msg.text && <p className="whitespace-pre-wrap">{msg.text}</p>}
                   {msg.poll && <PollDisplay msg={msg} />}
+                  {msg.fileInfo && <FileDisplay msg={msg} />}
                   <p className={cn(
                       "text-[10px] sm:text-xs mt-1 sm:mt-1.5 opacity-70",
                       msg.senderId === currentUser.id ? "text-right" : "text-left"
@@ -244,6 +321,36 @@ export function MessageArea({ chatRoom, currentUser, onBack }: MessageAreaProps)
           </div>
         )}
       </ScrollArea>
+      
+      {selectedFilePreview && selectedFile?.type.startsWith('image/') && (
+        <div className="p-2 border-t bg-card/80">
+          <div className="flex items-center gap-2">
+            <Image src={selectedFilePreview} alt="Selected preview" width={48} height={48} className="rounded object-cover h-12 w-12" />
+            <div className="text-xs text-muted-foreground truncate flex-1">
+              <p className="font-medium text-foreground truncate">{selectedFile.name}</p>
+              {selectedFile.type} - {formatFileSize(selectedFile.size)}
+            </div>
+            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { setSelectedFile(null); setSelectedFilePreview(null); if(fileInputRef.current) fileInputRef.current.value = ''; }}>
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      )}
+      {selectedFile && !selectedFile.type.startsWith('image/') && (
+         <div className="p-2 border-t bg-card/80">
+          <div className="flex items-center gap-2">
+            <FileText className="h-8 w-8 text-muted-foreground shrink-0" />
+            <div className="text-xs text-muted-foreground truncate flex-1">
+              <p className="font-medium text-foreground truncate">{selectedFile.name}</p>
+              {selectedFile.type} - {formatFileSize(selectedFile.size)}
+            </div>
+            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { setSelectedFile(null); if(fileInputRef.current) fileInputRef.current.value = ''; }}>
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      )}
+
 
       <footer className="p-2 sm:p-3 border-t bg-card/80 backdrop-blur-sm sticky bottom-0 z-10">
         <form onSubmit={(e) => handleSendMessage(e)} className="flex items-center gap-2">
@@ -257,6 +364,20 @@ export function MessageArea({ chatRoom, currentUser, onBack }: MessageAreaProps)
               <span className="sr-only">Create Poll</span>
             </Button>
           </CreatePollDialog>
+          
+          <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept="image/*,video/*,application/pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt" />
+          <Button 
+            variant="ghost" 
+            size="icon" 
+            type="button" 
+            className="rounded-lg h-9 w-9 sm:h-10 sm:w-10 shrink-0 text-muted-foreground hover:text-primary"
+            onClick={() => fileInputRef.current?.click()}
+            title="Attach file"
+          >
+            <Paperclip className="h-4 w-4 sm:h-5 sm:w-5" />
+            <span className="sr-only">Attach file</span>
+          </Button>
+
           <Input
             ref={inputRef}
             value={newMessage}
@@ -266,7 +387,7 @@ export function MessageArea({ chatRoom, currentUser, onBack }: MessageAreaProps)
             className="flex-1 h-9 sm:h-10 text-sm rounded-lg transition-shadow duration-200 focus:shadow-lg"
             autoComplete="off"
           />
-          <Button type="submit" size="icon" disabled={isSending || (!newMessage.trim()) || isLoadingMessages} className="rounded-lg h-9 w-9 sm:h-10 sm:w-10 shrink-0">
+          <Button type="submit" size="icon" disabled={isSending || (!newMessage.trim() && !selectedFile) || isLoadingMessages} className="rounded-lg h-9 w-9 sm:h-10 sm:w-10 shrink-0">
             {isSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
             <span className="sr-only">Send</span>
           </Button>

@@ -1,3 +1,4 @@
+
 // src/services/chatService.ts
 import { db } from '@/lib/firebase';
 import {
@@ -20,7 +21,7 @@ import {
   setDoc,
   runTransaction
 } from 'firebase/firestore';
-import type { ChatMessage, ChatRoom, Poll } from '@/types';
+import type { ChatMessage, ChatRoom, Poll, FileInfo } from '@/types';
 import { formatISO } from 'date-fns';
 
 // Helper to generate a consistent private chat room ID
@@ -84,15 +85,16 @@ export const sendMessage = async (
   senderId: string,
   senderDisplayName: string,
   text: string,
-  poll?: Poll // Add poll as an optional parameter
+  poll?: Poll,
+  fileInfo?: FileInfo // Add fileInfo as an optional parameter
 ): Promise<void> => {
-  if (!text.trim() && !poll) return; // Message must have text or a poll
+  if (!text.trim() && !poll && !fileInfo) return; // Message must have text, a poll, or a file
 
   const messagesColRef = collection(db, 'chatRooms', chatRoomId, 'messages');
   const chatRoomRef = doc(db, 'chatRooms', chatRoomId);
 
   try {
-    const newMessageData: Omit<ChatMessage, 'id' | 'createdAt'> & { createdAt: Timestamp, poll?: Poll } = {
+    const newMessageData: Omit<ChatMessage, 'id' | 'createdAt'> & { createdAt: Timestamp, poll?: Poll, fileInfo?: FileInfo } = {
       chatRoomId,
       senderId,
       senderDisplayName,
@@ -100,24 +102,29 @@ export const sendMessage = async (
       createdAt: serverTimestamp() as Timestamp,
     };
     if (poll) {
-      // Ensure poll options have an empty voterIds array if not provided
       const sanitizedPoll: Poll = {
         ...poll,
         options: poll.options.map(opt => ({
           ...opt,
           voterIds: opt.voterIds || [] 
         })),
-        createdAt: poll.createdAt || formatISO(new Date()) // Ensure createdAt is set
+        createdAt: poll.createdAt || formatISO(new Date())
       };
       newMessageData.poll = sanitizedPoll;
     }
+    if (fileInfo) {
+      newMessageData.fileInfo = fileInfo;
+    }
+
     await addDoc(messagesColRef, newMessageData);
 
-    // Update the chat room's last message details
     let lastMessageText = text.trim();
-    if (poll && !lastMessageText) { // If only a poll is sent, use its question as last message text
-        lastMessageText = `Poll: ${poll.question}`;
+    if (!lastMessageText && fileInfo) {
+      lastMessageText = `File: ${fileInfo.name}`;
+    } else if (!lastMessageText && poll) {
+      lastMessageText = `Poll: ${poll.question}`;
     }
+    
 
     await updateDoc(chatRoomRef, {
       lastMessageText: lastMessageText.length > 100 ? lastMessageText.substring(0, 97) + "..." : lastMessageText,
@@ -126,7 +133,7 @@ export const sendMessage = async (
     });
   } catch (error) {
     console.error("Error sending message:", error);
-    throw error; // Re-throw to be caught by UI
+    throw error; 
   }
 };
 
@@ -152,22 +159,15 @@ export const voteOnPoll = async (
       }
 
       const currentPoll = messageData.poll;
-      let userAlreadyVotedForThisOption = false;
-
+      
       const newOptions = currentPoll.options.map(opt => {
-        let newVoterIds = [...(opt.voterIds || [])]; // Ensure voterIds is an array
+        let newVoterIds = [...(opt.voterIds || [])]; 
 
-        if (opt.id === optionId) { // This is the option the user clicked
-          if (newVoterIds.includes(userId)) {
-            // User is trying to un-vote (or re-vote for the same)
-            // For simplicity, let's allow re-voting for the same (no change) or un-voting
-            // newVoterIds = newVoterIds.filter(voter => voter !== userId); // To allow un-voting
-            userAlreadyVotedForThisOption = true; // Mark that user had already voted for this
-          } else {
-            newVoterIds.push(userId); // Add user's vote
+        if (opt.id === optionId) { 
+          if (!newVoterIds.includes(userId)) {
+            newVoterIds.push(userId); 
           }
         } else {
-          // This is not the option the user clicked, so remove their vote if it exists
           if (newVoterIds.includes(userId)) {
             newVoterIds = newVoterIds.filter(voter => voter !== userId);
           }
@@ -175,10 +175,6 @@ export const voteOnPoll = async (
         return { ...opt, voterIds: newVoterIds };
       });
       
-      // If user clicked an option they hadn't voted for, and they had voted for another,
-      // the above loop already removed their old vote.
-      // If they clicked the same option they already voted for, no change in voterIds array.
-
       transaction.update(messageRef, { poll: { ...currentPoll, options: newOptions } });
     });
   } catch (error) {
@@ -210,11 +206,16 @@ export const getChatRoomMessagesStream = (
                      : [],
         } : undefined;
 
+        const fileInfoData = data.fileInfo ? {
+          ...data.fileInfo,
+        } : undefined;
+
         return {
           id: docSnap.id,
           ...data,
           createdAt: (data.createdAt as Timestamp)?.toDate ? formatISO((data.createdAt as Timestamp).toDate()) : formatISO(new Date()),
           poll: pollData,
+          fileInfo: fileInfoData,
         } as ChatMessage;
       });
       callback(messages);

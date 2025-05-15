@@ -98,6 +98,14 @@ export interface Poll {
   createdAt: string; // ISO string
 }
 
+export interface FileInfo {
+  name: string;
+  type: string;
+  size: number;
+  placeholderUrl?: string; // For image previews (Data URL)
+  // status might be added later for actual P2P transfer: 'sending', 'sent', 'receiving', 'received', 'failed'
+}
+
 export interface ChatMessage {
   id: string;
   chatRoomId: string;
@@ -106,6 +114,7 @@ export interface ChatMessage {
   text: string;
   createdAt: string; // ISO string for Firestore serverTimestamp
   poll?: Poll; // Optional poll object
+  fileInfo?: FileInfo; // Optional file info
 }
 
 export interface ChatRoom {
