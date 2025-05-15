@@ -10,13 +10,15 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Send, User, Loader2, MessageSquare, ArrowLeft, BarChart3, CheckCircle, Paperclip, FileText, Image as ImageIcon } from 'lucide-react';
+import { Send, User, Loader2, MessageSquare, ArrowLeft, BarChart3, CheckCircle, Paperclip, FileText, Image as ImageIcon, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { format, parseISO, isToday, isYesterday } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
 import { CreatePollDialog } from './CreatePollDialog'; 
 import { Progress } from '@/components/ui/progress';
 import Image from 'next/image';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+
 
 interface MessageAreaProps {
   chatRoom: ChatRoom;
@@ -72,6 +74,7 @@ export function MessageArea({ chatRoom, currentUser, onBack }: MessageAreaProps)
   }, [chatRoom, currentUser.id]);
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    // This function will be kept for future implementation but the button triggering it will be disabled.
     const file = event.target.files?.[0];
     if (file) {
       setSelectedFile(file);
@@ -90,10 +93,13 @@ export function MessageArea({ chatRoom, currentUser, onBack }: MessageAreaProps)
   const handleSendMessage = async (e?: React.FormEvent<HTMLFormElement>, pollData?: Poll) => {
     e?.preventDefault();
     const textToSend = newMessage.trim();
+    // File sending logic is effectively disabled since the button is disabled.
+    // We keep selectedFile check for completeness if it were enabled.
     if ((!textToSend && !pollData && !selectedFile) || !currentUser.displayName || isSending) return;
 
     setIsSending(true);
     let fileInfoToSend: FileInfo | undefined = undefined;
+    // This part will not be reached if the button is disabled
     if (selectedFile) {
       fileInfoToSend = {
         name: selectedFile.name,
@@ -121,6 +127,9 @@ export function MessageArea({ chatRoom, currentUser, onBack }: MessageAreaProps)
   };
   
   const handleCreatePollSubmit = (poll: Poll, pollMessageText: string) => {
+    // Pass empty text if only poll message is there, or if text is empty, the poll question will be used by sendMessage
+    const textForMessage = newMessage.trim() || (pollMessageText !== poll.question ? pollMessageText : '');
+    setNewMessage(textForMessage); // Set newMessage to ensure it's sent if pollMessageText is used
     handleSendMessage(undefined, poll); 
   };
 
@@ -188,7 +197,7 @@ export function MessageArea({ chatRoom, currentUser, onBack }: MessageAreaProps)
                                 size="sm" 
                                 className="w-full text-xs h-7"
                                 onClick={() => handleVote(msg.id, option.id)}
-                                disabled={isCurrentlyVoting}
+                                disabled={isCurrentlyVoting || (!!userVote && !hasVotedForThis)} // Disable if voting or already voted for another option. Allow changing vote.
                             >
                                 {isCurrentlyVoting && hasVotedForThis ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : 
                                  hasVotedForThis && <CheckCircle className="mr-1.5 h-3.5 w-3.5" />
@@ -234,8 +243,6 @@ export function MessageArea({ chatRoom, currentUser, onBack }: MessageAreaProps)
             />
           </div>
         )}
-        {/* Placeholder for download button or transfer status in future P2P implementation */}
-        {/* <Button variant="link" size="sm" className="mt-1 p-0 h-auto text-xs">Download</Button> */}
         <p className="text-[10px] text-muted-foreground mt-1.5">
             File shared by {msg.senderId === currentUser.id ? "You" : msg.senderDisplayName || "User"}.
             <br/> (Note: P2P transfer not yet implemented. This is a metadata placeholder.)
@@ -365,18 +372,37 @@ export function MessageArea({ chatRoom, currentUser, onBack }: MessageAreaProps)
             </Button>
           </CreatePollDialog>
           
-          <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept="image/*,video/*,application/pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt" />
-          <Button 
-            variant="ghost" 
-            size="icon" 
-            type="button" 
-            className="rounded-lg h-9 w-9 sm:h-10 sm:w-10 shrink-0 text-muted-foreground hover:text-primary"
-            onClick={() => fileInputRef.current?.click()}
-            title="Attach file"
-          >
-            <Paperclip className="h-4 w-4 sm:h-5 sm:w-5" />
-            <span className="sr-only">Attach file</span>
-          </Button>
+          <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept="image/*,video/*,application/pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt" disabled />
+          
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                 {/* The Button component itself needs to be focusable for TooltipTrigger if it's disabled.
+                     A common workaround is to wrap the disabled button in a span or div if direct focus isn't working.
+                     However, ShadCN's TooltipTrigger often handles this. Let's try direct first.
+                  */}
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  type="button" 
+                  className="rounded-lg h-9 w-9 sm:h-10 sm:w-10 shrink-0 text-muted-foreground hover:text-primary"
+                  onClick={() => { 
+                    // fileInputRef.current?.click(); // This line is commented out to keep the button disabled
+                    toast({ title: "File Sharing", description: "Psst! File sharing is brewing and will arrive in a future update!", duration: 4000 });
+                  }}
+                  disabled // Explicitly disable the button
+                  title="Attach file (Coming soon!)"
+                >
+                  <Paperclip className="h-4 w-4 sm:h-5 sm:w-5" />
+                  <span className="sr-only">Attach file</span>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="top" align="center">
+                <p>Our digital carrier pigeons are still in training for file delivery. 🚀 Coming soon!</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+
 
           <Input
             ref={inputRef}
@@ -396,3 +422,4 @@ export function MessageArea({ chatRoom, currentUser, onBack }: MessageAreaProps)
     </div>
   );
 }
+
