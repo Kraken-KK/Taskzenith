@@ -1,3 +1,4 @@
+
 'use client';
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
@@ -13,9 +14,8 @@ import {
   type ChatOutput,
   type TaskAction,
   type PreferenceUpdate,
+  type ToolCallRequest,
 } from '@/ai/flows/chat-flow';
-// nameChatSession is removed for now, will use default naming.
-// import { nameChatSession } from '@/ai/flows/name-chat-session-flow'; 
 import type { MessageHistoryItem, AiChatSession } from '@/types';
 import { useTasks } from '@/contexts/TaskContext';
 import { useSettings } from '@/contexts/SettingsContext';
@@ -40,15 +40,15 @@ interface DisplayMessage {
   timestamp: number;
 }
 
-const MAX_HISTORY_FOR_AI = 20;
-const MIN_MESSAGES_FOR_AUTOSAVE_NEW_CHAT = 1; // Save after 1st user message and AI response cycle
+const MAX_HISTORY_FOR_AI = 20; // Max messages sent to AI model
+const MIN_MESSAGES_FOR_NEW_SESSION_SAVE = 1; // Minimum USER messages before a new session is auto-saved.
 
 export function AiChat() {
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false); // For AI response loading
   const [isLoadingHistory, setIsLoadingHistory] = useState(false); // For loading session messages
-  
+
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [activeSessionName, setActiveSessionName] = useState<string>("New Chat");
 
@@ -59,7 +59,7 @@ export function AiChat() {
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const { getActiveBoard, updateTask, moveTask } = useTasks();
+  const { getActiveBoard, updateTask, moveTask, addTask: addBoardTask } = useTasks();
   const { interactionStyle, setInteractionStyle: setSettingsInteractionStyle } = useSettings();
   const { currentUser, isGuest } = useAuth();
   const { toast } = useToast();
@@ -69,10 +69,10 @@ export function AiChat() {
     if (viewport) {
       setTimeout(() => {
         viewport.scrollTo({ top: viewport.scrollHeight, behavior: 'smooth' });
-      }, 100); // Small delay to ensure DOM update
+      }, 150); // Adjusted delay for DOM updates
     }
   }, []);
-  
+
   useEffect(() => {
     scrollToBottom();
   }, [messages, scrollToBottom]);
@@ -84,55 +84,55 @@ export function AiChat() {
       const unsubscribe = getAiChatSessionsStream(currentUser.id, (fetchedSessions) => {
         setSavedSessions(fetchedSessions);
         setIsLoadingSessions(false);
-        // If there's no active session and sessions are loaded, maybe select the latest one?
-        // Or leave it on "New Chat" - current behavior.
       });
       return () => unsubscribe();
     } else {
       setSavedSessions([]);
       setIsLoadingSessions(false);
-      handleNewChat(); // Reset to new chat for guest or if user logs out
+      handleNewChat();
     }
   }, [currentUser, isGuest]);
 
-  const convertDisplayMessagesToHistoryItems = (displayMessages: DisplayMessage[]): MessageHistoryItem[] => {
+  const convertDisplayMessagesToHistoryItems = useCallback((displayMessages: DisplayMessage[]): MessageHistoryItem[] => {
     return displayMessages
       .filter(msg => (msg.sender === 'user' || msg.sender === 'ai') && typeof msg.text === 'string')
       .map(msg => ({
         role: msg.sender === 'user' ? 'user' : 'model',
-        parts: [{ text: typeof msg.text === 'string' ? msg.text : 'Structured AI Message' }] // Ensure text is string
+        parts: [{ text: typeof msg.text === 'string' ? msg.text : 'Structured AI Message' }]
       }));
-  };
-  
-  const convertHistoryItemsToDisplayMessages = (historyItems: MessageHistoryItem[]): DisplayMessage[] => {
+  }, []);
+
+  const convertHistoryItemsToDisplayMessages = useCallback((historyItems: MessageHistoryItem[]): DisplayMessage[] => {
     return historyItems.map((item, index) => ({
-      id: `hist-${Date.now()}-${index}`,
+      id: `hist-${Date.now()}-${index}-${Math.random()}`, // Ensure unique ID
       sender: item.role === 'model' ? 'ai' : 'user',
       text: item.parts[0]?.text || '',
-      timestamp: Date.now() - (historyItems.length - index) * 1000, 
+      timestamp: Date.now() - (historyItems.length - index) * 1000,
     }));
-  };
+  }, []);
 
-  const saveOrUpdateSession = useCallback(async (currentDisplayMessages: DisplayMessage[]) => {
-    if (!currentUser || isGuest || currentDisplayMessages.length === 0) return;
+  const saveOrUpdateSession = useCallback(async (historyToSave: MessageHistoryItem[]) => {
+    if (!currentUser || isGuest || historyToSave.length === 0) return;
 
-    const historyForFirestore = convertDisplayMessagesToHistoryItems(currentDisplayMessages);
-    if(historyForFirestore.length === 0 && !activeSessionId) return; // Don't save empty new chats
+    const historyForFirestore = historyToSave; // Already in correct format
 
-    if (activeSessionId) { // Existing session
+    if (historyForFirestore.length === 0 && !activeSessionId) return;
+
+    if (activeSessionId) {
       await updateAiChatSession(currentUser.id, activeSessionId, historyForFirestore, activeSessionName);
-    } else { // New session
-      // Only save new session if it has at least MIN_MESSAGES_FOR_AUTOSAVE_NEW_CHAT from user + AI cycle
-      const userMessagesCount = currentDisplayMessages.filter(m => m.sender === 'user').length;
-      if (userMessagesCount >= MIN_MESSAGES_FOR_AUTOSAVE_NEW_CHAT) {
+    } else {
+      // Check if there's at least MIN_MESSAGES_FOR_NEW_SESSION_SAVE user messages
+      const userMessagesInHistory = historyForFirestore.filter(m => m.role === 'user');
+      if (userMessagesInHistory.length >= MIN_MESSAGES_FOR_NEW_SESSION_SAVE) {
         let newSessionName = "New Chat";
-        const firstUserMessage = currentDisplayMessages.find(m => m.sender === 'user');
-        if (firstUserMessage && typeof firstUserMessage.text === 'string' && firstUserMessage.text.trim() !== '') {
-          newSessionName = firstUserMessage.text.trim().split(' ').slice(0, 5).join(' ') + (firstUserMessage.text.trim().split(' ').length > 5 ? '...' : '');
+        const firstUserMessagePart = userMessagesInHistory[0]?.parts[0]?.text;
+        if (firstUserMessagePart && firstUserMessagePart.trim() !== '') {
+          const text = firstUserMessagePart.trim();
+          newSessionName = text.split(' ').slice(0, 5).join(' ') + (text.split(' ').length > 5 ? '...' : '');
         } else {
           newSessionName = `Chat - ${new Date().toLocaleDateString()}`;
         }
-        
+
         const newId = await createAiChatSession(currentUser.id, newSessionName, historyForFirestore);
         if (newId) {
           setActiveSessionId(newId);
@@ -144,10 +144,10 @@ export function AiChat() {
 
 
   const prepareBoardContext = (): ChatInput['activeBoardContext'] => {
-    const activeBoard = getActiveBoard();
-    if (!activeBoard) return undefined;
+    const currentActiveBoard = getActiveBoard();
+    if (!currentActiveBoard) return undefined;
 
-    const tasks = activeBoard.columns.flatMap(col =>
+    const tasks = currentActiveBoard.columns.flatMap(col =>
       col.tasks.map(task => ({
         id: task.id,
         content: task.content,
@@ -156,8 +156,8 @@ export function AiChat() {
         deadline: task.deadline,
       }))
     );
-    const columnNames = activeBoard.columns.map(col => col.title);
-    return { boardName: activeBoard.name, tasks, columnNames };
+    const columnNames = currentActiveBoard.columns.map(col => col.title);
+    return { boardName: currentActiveBoard.name, tasks, columnNames };
   };
 
   const prepareUserPreferences = (): ChatInput['userPreferences'] => {
@@ -165,16 +165,16 @@ export function AiChat() {
   };
 
   const handleTaskAction = (action: TaskAction) => {
-    const activeBoard = getActiveBoard();
-    if (!activeBoard) {
+    const currentActiveBoard = getActiveBoard();
+    if (!currentActiveBoard) {
       toast({ title: "Action Failed", description: "No active board selected.", variant: "destructive" });
       return;
     }
 
-    let foundTask: any | undefined; 
+    let foundTask: any | undefined;
     let sourceColumn: any | undefined;
 
-    for (const col of activeBoard.columns) {
+    for (const col of currentActiveBoard.columns) {
       foundTask = col.tasks.find(t =>
         (t.content?.toLowerCase() === action.taskIdentifier?.toLowerCase()) ||
         (t.id === action.taskIdentifier)
@@ -186,7 +186,7 @@ export function AiChat() {
     }
 
     if (action.type === 'createTask' && action.taskDetails) {
-        const firstColumnId = activeBoard.columns.length > 0 ? activeBoard.columns[0].id : undefined;
+        const firstColumnId = currentActiveBoard.columns.length > 0 ? currentActiveBoard.columns[0].id : undefined;
         if (!firstColumnId) {
             toast({ title: "Task Creation Failed", description: "No columns available to add the task.", variant: "destructive" });
             addSystemMessage("I couldn't create the task because there are no columns on your board.");
@@ -196,11 +196,9 @@ export function AiChat() {
             content: action.taskDetails.content,
             priority: action.taskDetails.priority || 'medium',
             deadline: action.taskDetails.deadline,
-            description: action.taskDetails.description, // Assuming taskDetails might have description
+            description: action.taskDetails.description,
         };
-        // useTasks().addTask(newTaskData, action.taskDetails.status || firstColumnId); // Assuming addTask can take target status
-        // For simplicity, let's assume addTask adds to the first column or a specified one
-        useTasks().addTask(newTaskData, firstColumnId); 
+        addBoardTask(newTaskData, firstColumnId);
         toast({ title: "Task Created", description: `Task "${action.taskDetails.content}" created.` });
         addSystemMessage(`I've created the task: "${action.taskDetails.content}".`);
         return;
@@ -214,10 +212,10 @@ export function AiChat() {
     }
 
     if (action.type === 'updateStatus') {
-      const targetColumn = activeBoard.columns.find(col => col.title.toLowerCase() === action.targetValue?.toLowerCase());
+      const targetColumn = currentActiveBoard.columns.find(col => col.title.toLowerCase() === action.targetValue?.toLowerCase());
       if (!targetColumn) {
         toast({ title: "Status Not Found", description: `Could not find status/column: "${action.targetValue}".`, variant: "destructive" });
-        addSystemMessage(`I couldn't find the column "${action.targetValue}" on your board. Available columns are: ${activeBoard.columns.map(c => c.title).join(', ')}.`);
+        addSystemMessage(`I couldn't find the column "${action.targetValue}" on your board. Available columns are: ${currentActiveBoard.columns.map(c => c.title).join(', ')}.`);
         return;
       }
       moveTask(foundTask.id, sourceColumn.id, targetColumn.id, false);
@@ -247,18 +245,18 @@ export function AiChat() {
 
   const addSystemMessage = (text: string) => {
     const systemMessage: DisplayMessage = {
-        id: `msg-${Date.now()}-system`,
+        id: `msg-${Date.now()}-system-${Math.random()}`,
         sender: 'system',
         text,
         timestamp: Date.now(),
     };
     setMessages(prev => [...prev, systemMessage]);
   };
-  
+
   const handleSelectSession = async (sessionId: string, sessionName: string) => {
-    if (!currentUser) return;
+    if (!currentUser || activeSessionId === sessionId) return; // Don't reload if already active
     setIsLoadingHistory(true);
-    setMessages([]); // Clear current messages before loading new ones
+    setMessages([]);
     try {
       const fetchedMessages = await getAiChatSessionMessages(currentUser.id, sessionId);
       setMessages(convertHistoryItemsToDisplayMessages(fetchedMessages));
@@ -267,8 +265,8 @@ export function AiChat() {
     } catch (error) {
       console.error("Error loading session messages:", error);
       toast({title: "Load Error", description: "Could not load chat history.", variant: "destructive"});
-      setMessages([]); // Ensure messages are cleared on error
-      setActiveSessionId(null); // Reset active session on error
+      setMessages([]);
+      setActiveSessionId(null);
       setActiveSessionName("New Chat");
     } finally {
       setIsLoadingHistory(false);
@@ -291,9 +289,9 @@ export function AiChat() {
       await deleteAiChatSession(currentUser.id, sessionIdToDelete);
       toast({ title: "Chat Deleted", description: `Chat session has been deleted.` });
       if (activeSessionId === sessionIdToDelete) {
-        handleNewChat(); 
+        handleNewChat();
       }
-      // The session list will auto-update via its stream listener
+      // The session list will auto-update via its stream listener in AiChatSessionList
     } catch (error) {
       console.error("Error deleting session:", error);
       toast({ title: "Deletion Failed", description: "Could not delete the chat session.", variant: "destructive"});
@@ -307,18 +305,21 @@ export function AiChat() {
     if (!trimmedInput || isLoading) return;
 
     const userMessage: DisplayMessage = {
-      id: `msg-${Date.now()}-user`,
+      id: `msg-${Date.now()}-user-${Math.random()}`,
       sender: 'user',
       text: trimmedInput,
       timestamp: Date.now(),
     };
 
-    const currentMessagesWithUser = [...messages, userMessage];
-    setMessages(currentMessagesWithUser);
+    // This history is for AI input. It converts current display messages to history items.
+    const currentDisplayMessagesForAI = [...messages, userMessage];
+    const historyForAIInput = convertDisplayMessagesToHistoryItems(currentDisplayMessagesForAI).slice(-MAX_HISTORY_FOR_AI);
+
+    setMessages(currentDisplayMessagesForAI); // Update UI with user message immediately
     setInputValue('');
     setIsLoading(true);
 
-    const thinkingMessageId = `msg-${Date.now()}-ai-thinking`;
+    const thinkingMessageId = `msg-${Date.now()}-ai-thinking-${Math.random()}`;
     const thinkingMessage: DisplayMessage = {
         id: thinkingMessageId,
         sender: 'ai',
@@ -330,16 +331,12 @@ export function AiChat() {
         ),
         timestamp: Date.now(),
     };
-    setMessages(prev => [...prev, thinkingMessage]);
+    setMessages(prev => [...prev, thinkingMessage]); // Add thinking message to UI
     scrollToBottom();
-
-
-    const historyForAI: MessageHistoryItem[] = convertDisplayMessagesToHistoryItems(currentMessagesWithUser)
-      .slice(-MAX_HISTORY_FOR_AI);
 
     const aiInput: ChatInput = {
       query: trimmedInput,
-      history: historyForAI,
+      history: historyForAIInput, // Pass the converted and sliced history
       activeBoardContext: prepareBoardContext(),
       userPreferences: prepareUserPreferences(),
     };
@@ -348,28 +345,35 @@ export function AiChat() {
       const aiResponse: ChatOutput | null = await chatWithAI(aiInput);
 
       let aiTextResponse: string | React.ReactNode;
+      let modelResponseMessagePart: { text: string };
+
       if (aiResponse && typeof aiResponse.response === 'string') {
         aiTextResponse = aiResponse.response;
+        modelResponseMessagePart = { text: aiResponse.response };
       } else {
         console.error('Invalid AI response structure from chatWithAI:', aiResponse);
         aiTextResponse = ( <span className="text-destructive"> Sorry, Jack could not process that. Please try again. (Response Error) </span> );
+        modelResponseMessagePart = { text: "Sorry, Jack could not process that. Please try again. (Response Error)" };
       }
       
-      const aiResponseMessage: DisplayMessage = {
-        id: thinkingMessageId, 
+      const aiResponseMessageForDisplay: DisplayMessage = {
+        id: thinkingMessageId, // Use thinkingMessageId to replace it
         sender: 'ai',
         text: aiTextResponse,
         timestamp: Date.now(),
       };
       
+      // Replace thinking message with actual AI response in UI
       setMessages(prevMessages => 
-        prevMessages.map(msg => msg.id === thinkingMessageId ? aiResponseMessage : msg)
+        prevMessages.map(msg => msg.id === thinkingMessageId ? aiResponseMessageForDisplay : msg)
       );
       
-      const messagesToSave = currentMessagesWithUser.map(msg => msg.id === thinkingMessageId ? aiResponseMessage : msg);
-      // Filter out the placeholder if it was replaced by the actual AI message
-      const finalMessagesToSave = messagesToSave.filter(msg => !(msg.id === thinkingMessageId && typeof msg.text !== 'string'));
-      await saveOrUpdateSession(finalMessagesToSave);
+      // Construct the full history for saving, using the already prepared historyForAIInput and the new model response
+      const fullHistoryForSaving: MessageHistoryItem[] = [
+        ...historyForAIInput, 
+        { role: 'model', parts: [modelResponseMessagePart] }
+      ];
+      await saveOrUpdateSession(fullHistoryForSaving);
 
 
       if (aiResponse?.taskAction) {
@@ -385,16 +389,25 @@ export function AiChat() {
     } catch (error) {
       console.error('Error fetching AI response in AiChat.tsx:', error);
       const errorMessageText = error instanceof Error ? error.message : 'An unknown error occurred.';
-      const errorDisplayMessage: DisplayMessage = {
-        id: thinkingMessageId,
+      const errorDisplayMessageForChat: DisplayMessage = {
+        id: thinkingMessageId, // Use thinkingMessageId to replace it
         sender: 'ai',
         text: ( <span className="text-destructive"> Sorry, Jack encountered an issue: {errorMessageText} </span> ),
         timestamp: Date.now(),
       };
+      const modelErrorResponseMessagePart: { text: string } = { text: `Sorry, Jack encountered an issue: ${errorMessageText}` };
+      
+      // Replace thinking message with error message in UI
       setMessages(prevMessages => 
-        prevMessages.map(msg => msg.id === thinkingMessageId ? errorDisplayMessage : msg)
+        prevMessages.map(msg => msg.id === thinkingMessageId ? errorDisplayMessageForChat : msg)
       );
-      await saveOrUpdateSession(messages.map(msg => msg.id === thinkingMessageId ? errorDisplayMessage : msg));
+
+      // Construct the full history for saving, using historyForAIInput and the error model response
+      const fullHistoryForSavingOnError: MessageHistoryItem[] = [
+        ...historyForAIInput,
+        { role: 'model', parts: [modelErrorResponseMessagePart] }
+      ];
+      await saveOrUpdateSession(fullHistoryForSavingOnError);
     } finally {
       setIsLoading(false);
       inputRef.current?.focus();
@@ -421,7 +434,7 @@ export function AiChat() {
         <CardHeader className="border-b bg-card/80 backdrop-blur-md sticky top-0 z-10">
           <CardTitle className="flex items-center gap-2 text-lg font-semibold">
             <Bot className="h-6 w-6 text-primary" /> 
-            {activeSessionId ? activeSessionName : "AI Assistant (Jack)"}
+            {activeSessionName}
           </CardTitle>
         </CardHeader>
         <CardContent className="flex-1 p-0">
@@ -503,3 +516,4 @@ export function AiChat() {
     </Card>
   );
 }
+
