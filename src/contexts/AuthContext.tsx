@@ -55,8 +55,8 @@ const assignTaskStatusToDefaultColumns = (columns: Column[]): Column[] => {
       dependencies: Array.isArray(task.dependencies) ? task.dependencies : [],
       tags: Array.isArray(task.tags) ? task.tags : [],
       assignedTo: Array.isArray(task.assignedTo) ? task.assignedTo : [],
-      description: task.description || undefined,
-      deadline: task.deadline || undefined,
+      description: task.description || null,
+      deadline: task.deadline || null,
     })) : [],
   }));
 };
@@ -205,12 +205,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           boards: [defaultBoard],
           activeBoardId: defaultBoard.id,
           settings: defaultUserSettings,
-          aiChatHistory: defaultAiChatHistory,
+          aiChatHistory: { // Ensure aiChatHistory is correctly initialized
+            messages: [],
+            lastUpdatedAt: serverTimestamp(),
+          },
           boardGroups: [] as BoardGroup[],
-          organizationMemberships: [] as string[], // Initialize as empty array
-          teamMemberships: [] as string[],       // Initialize as empty array
-          defaultOrganizationId: null,      // Initialize as null
-          chatRoomIds: [] as string[],           // Initialize as empty array
+          organizationMemberships: [] as string[],
+          teamMemberships: [] as string[],
+          defaultOrganizationId: null,
+          chatRoomIds: [] as string[],
         };
         console.log(`Firestore Init: Data for new user ${appUser.id}:`, JSON.stringify(newUserDocumentData, null, 2));
         await setDoc(userDocRef, newUserDocumentData);
@@ -228,7 +231,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           needsUpdate = true;
           console.log(`Firestore Init: User ${appUser.id} - boards missing or empty. Adding default board.`);
         } else {
-          // Ensure all boards have necessary fields, especially for collaboration
           updates.boards = userData.boards.map((board: Board) => ({
             ...board,
             id: board.id || generateId('board-migrated'),
@@ -254,7 +256,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           console.log(`Firestore Init: User ${appUser.id} - activeBoardId was invalid or missing. Reset to first board.`);
         }
 
-
         if (!userData.settings) {
           updates.settings = defaultUserSettings;
           needsUpdate = true;
@@ -262,16 +263,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         
         let currentAiChatHistory = userData.aiChatHistory;
         let aiHistoryNeedsUpdate = false;
-        if (!currentAiChatHistory || typeof currentAiChatHistory !== 'object') {
-          currentAiChatHistory = { messages: [] as MessageHistoryItem[], lastUpdatedAt: serverTimestamp() as Timestamp };
+        if (!currentAiChatHistory || typeof currentAiChatHistory !== 'object' || !('messages' in currentAiChatHistory) || !('lastUpdatedAt' in currentAiChatHistory)) {
+          currentAiChatHistory = { messages: [], lastUpdatedAt: serverTimestamp() };
           aiHistoryNeedsUpdate = true;
         } else {
           if (!Array.isArray(currentAiChatHistory.messages)) {
-            currentAiChatHistory.messages = [] as MessageHistoryItem[];
+            currentAiChatHistory.messages = [];
             aiHistoryNeedsUpdate = true;
           }
-          if (typeof currentAiChatHistory.lastUpdatedAt === 'undefined') {
-            currentAiChatHistory.lastUpdatedAt = serverTimestamp() as Timestamp;
+          if (typeof currentAiChatHistory.lastUpdatedAt === 'undefined') { 
+            currentAiChatHistory.lastUpdatedAt = serverTimestamp();
             aiHistoryNeedsUpdate = true;
           }
         }
@@ -280,6 +281,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           needsUpdate = true;
           console.log(`Firestore Init: User ${appUser.id} - aiChatHistory field was missing or malformed. Repaired/Initialized.`);
         }
+
 
         if (!userData.boardGroups || !Array.isArray(userData.boardGroups)) {
           updates.boardGroups = [];
@@ -293,7 +295,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           updates.teamMemberships = [];
           needsUpdate = true;
         }
-        if (userData.defaultOrganizationId === undefined) { // Check for undefined explicitly
+        if (userData.defaultOrganizationId === undefined) {
           updates.defaultOrganizationId = null;
           needsUpdate = true;
         }
@@ -302,20 +304,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           needsUpdate = true;
         }
 
-        // Update profile info if changed
         if (appUser.email && userData.email !== appUser.email) {
             updates.email = appUser.email; needsUpdate = true;
         }
         if (appUser.displayName && userData.displayName !== appUser.displayName) {
             updates.displayName = appUser.displayName; needsUpdate = true;
         }
-        if (appUser.photoURL !== undefined && userData.photoURL !== appUser.photoURL) { // Check for undefined for photoURL
+        if (appUser.photoURL !== undefined && userData.photoURL !== appUser.photoURL) {
             updates.photoURL = appUser.photoURL || null; needsUpdate = true;
         }
-        if(userData.provider !== appUser.provider) { // Ensure provider is also updated if changed
+        if(userData.provider !== appUser.provider) {
             updates.provider = appUser.provider; needsUpdate = true;
         }
-
 
         if (needsUpdate) {
           console.log(`Firestore Init: Updating existing document for ${appUser.id} with changes:`, Object.keys(updates));
@@ -323,7 +323,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           console.log(`Firestore Init: SUCCESS - Document UPDATED for user: ${appUser.id}`);
         } else {
           console.log(`Firestore Init: No major field updates needed for ${appUser.id}. Updating lastLogin only.`);
-          await updateDoc(userDocRef, { lastLogin: serverTimestamp() as Timestamp }); // Still update lastLogin
+          await updateDoc(userDocRef, { lastLogin: serverTimestamp() as Timestamp });
         }
       }
     } catch (error) {
@@ -425,7 +425,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [isGuest]);
 
   const commonLoginSuccess = async (appUser: AppUser, provider: AuthProviderType | 'google') => {
-    await initializeFirestoreUserData(appUser); // Ensure data is initialized/updated *before* setting state
+    await initializeFirestoreUserData(appUser); 
     setCurrentUser(appUser);
     setCurrentProvider(provider);
     setIsGuest(false);
@@ -437,7 +437,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const commonSignupSuccess = async (appUser: AppUser, provider: AuthProviderType | 'google') => {
-    await initializeFirestoreUserData(appUser); // Ensure data is initialized/updated *before* setting state
+    await initializeFirestoreUserData(appUser); 
     setCurrentUser(appUser);
     setCurrentProvider(provider);
     setIsGuest(false);
@@ -457,7 +457,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await updateFirebaseProfile(userCredential.user, { displayName });
 
       const appUser = mapFirebaseUserToAppUser(userCredential.user);
-      appUser.displayName = displayName; // Make sure this is set on the AppUser object
+      appUser.displayName = displayName;
 
       toast({ title: 'Firebase Signup Successful', description: 'Welcome aboard!' });
       await commonSignupSuccess(appUser, 'firebase');
@@ -533,7 +533,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         password,
         options: {
           data: {
-            displayName: email.split('@')[0] // Store displayName in Supabase user_metadata
+            displayName: email.split('@')[0]
           }
         }
       });
@@ -619,7 +619,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     router.push('/login');
   }, [router]);
 
-  // --- Co-working Feature Functions ---
   const createOrganization = async (name: string, description?: string): Promise<Organization | null> => {
     if (!currentUser) {
         toast({ title: "Authentication Required", description: "You must be logged in to create an organization.", variant: "destructive" });
@@ -642,7 +641,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const userDocRef = doc(db, "users", currentUser.id);
         await updateDoc(userDocRef, {
             organizationMemberships: arrayUnion(newOrgRef.id),
-            defaultOrganizationId: newOrgRef.id, // Set as default for the creator
+            defaultOrganizationId: newOrgRef.id,
         });
 
         const newOrgData: Organization = {
@@ -651,7 +650,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             ownerId: orgData.ownerId, 
             memberIds: orgData.memberIds, 
             teamIds: orgData.teamIds, 
-            createdAt: new Date().toISOString(), // Use current time as placeholder
+            createdAt: new Date().toISOString(),
             description: orgData.description, 
             inviteCode: orgData.inviteCode
         };
@@ -675,67 +674,86 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const createTeam = async (name: string, organizationId: string, description?: string): Promise<Team | null> => {
     if (!currentUser) {
-        toast({ title: "Authentication Required", description: "You must be logged in to create a team.", variant: "destructive" });
-        return null;
+      toast({ title: "Authentication Required", description: "You must be logged in to create a team.", variant: "destructive" });
+      return null;
     }
     if (!organizationId) {
-        toast({ title: "Organization Required", description: "A team must belong to an organization.", variant: "destructive" });
-        return null;
+      toast({ title: "Organization Required", description: "A team must belong to an organization.", variant: "destructive" });
+      return null;
     }
     setLoading(true);
+    const batch = writeBatch(db);
     try {
-        const teamData = {
-            name,
-            description: description || "",
-            organizationId,
-            memberIds: [currentUser.id], // Creator is automatically a member and admin
-            adminIds: [currentUser.id],
-            createdAt: serverTimestamp(),
-        };
-        const newTeamRef = await addDoc(collection(db, "teams"), teamData);
+      const newTeamRef = doc(collection(db, "teams")); // Generate ID upfront
+      const teamData = {
+        name,
+        description: description || "",
+        organizationId,
+        memberIds: [currentUser.id], // Creator is automatically a member and admin
+        adminIds: [currentUser.id],
+        createdAt: serverTimestamp(),
+      };
+      batch.set(newTeamRef, teamData);
 
-        const orgDocRef = doc(db, "organizations", organizationId);
-        await updateDoc(orgDocRef, {
-            teamIds: arrayUnion(newTeamRef.id),
-        });
+      const orgDocRef = doc(db, "organizations", organizationId);
+      batch.update(orgDocRef, { teamIds: arrayUnion(newTeamRef.id) });
 
-        const userDocRef = doc(db, "users", currentUser.id);
-        await updateDoc(userDocRef, {
-            teamMemberships: arrayUnion(newTeamRef.id),
-        });
+      const userDocRef = doc(db, "users", currentUser.id);
+      batch.update(userDocRef, { teamMemberships: arrayUnion(newTeamRef.id) });
 
-        const newTeamData: Team = {
-            id: newTeamRef.id, 
-            name: teamData.name, 
-            organizationId: teamData.organizationId, 
-            memberIds: teamData.memberIds, 
-            adminIds: teamData.adminIds, 
-            createdAt: new Date().toISOString(), // Placeholder
-            description: teamData.description
-        };
+      await batch.commit();
 
-        setCurrentUser(prevUser => prevUser ? ({
-            ...prevUser,
-            teamMemberships: [...new Set([...(prevUser.teamMemberships || []), newTeamRef.id])],
-        }) : null);
+      const newTeamData: Team = {
+        id: newTeamRef.id,
+        name: teamData.name,
+        organizationId: teamData.organizationId,
+        memberIds: teamData.memberIds,
+        adminIds: teamData.adminIds,
+        createdAt: new Date().toISOString(), // Placeholder
+        description: teamData.description,
+      };
 
-        toast({ title: "Team Created", description: `Team "${name}" has been successfully created.` });
-        return newTeamData;
+      setCurrentUser(prevUser =>
+        prevUser
+          ? {
+              ...prevUser,
+              teamMemberships: [...new Set([...(prevUser.teamMemberships || []), newTeamRef.id])],
+            }
+          : null
+      );
+
+      toast({ title: "Team Created", description: `Team "${name}" has been successfully created.` });
+      return newTeamData;
     } catch (error) {
-        console.error("Error creating team:", error);
-        toast({ title: "Creation Failed", description: "Could not create the team.", variant: "destructive" });
-        return null;
+      console.error("Error creating team:", error);
+      toast({ title: "Creation Failed", description: "Could not create the team.", variant: "destructive" });
+      return null;
     } finally {
-        setLoading(false);
+      setLoading(false);
     }
   };
 
   const joinTeam = async (teamId: string): Promise<boolean> => {
-    if (!currentUser) return false;
+    if (!currentUser) {
+        toast({ title: "Authentication Required", variant: "destructive" });
+        return false;
+    }
     setLoading(true);
+    const batch = writeBatch(db);
     try {
-        const batch = writeBatch(db);
         const teamDocRef = doc(db, "teams", teamId);
+        // Check if team exists and get orgId (optional, for more validation)
+        // const teamSnap = await getDoc(teamDocRef);
+        // if (!teamSnap.exists()) {
+        //   toast({ title: "Team not found", variant: "destructive" });
+        //   return false;
+        // }
+        // const teamOrgId = teamSnap.data()?.organizationId;
+        // if (currentUser.defaultOrganizationId !== teamOrgId) {
+        //   toast({ title: "Cannot Join", description: "This team is not in your active organization.", variant: "destructive"});
+        //   return false;
+        // }
+
         batch.update(teamDocRef, { memberIds: arrayUnion(currentUser.id) });
 
         const userDocRef = doc(db, "users", currentUser.id);
@@ -791,16 +809,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
         let teamsQuery;
         if (organizationId) {
-            // Fetch teams for a specific organization the user is part of
             teamsQuery = query(
                 collection(db, "teams"), 
                 where("organizationId", "==", organizationId), 
                 where("memberIds", "array-contains", currentUser.id)
             );
         } else {
-            // Fetch all teams the user is a member of (less common, might need pagination for many teams)
-            // This relies on teamMemberships array on user doc being up-to-date, or query all teams.
-            // For simplicity, we'll query based on general membership if no specific orgId.
              teamsQuery = query(
                 collection(db, "teams"),
                 where("memberIds", "array-contains", currentUser.id)
@@ -815,7 +829,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                     name: data.name,
                     organizationId: data.organizationId,
                     memberIds: data.memberIds,
-                    adminIds: data.adminIds,
+                    adminIds: data.adminIds || [], // Ensure adminIds is initialized
                     createdAt: data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : new Date().toISOString(),
                     description: data.description,
                 } as Team;
@@ -854,6 +868,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     setLoading(true);
+    const batch = writeBatch(db);
     try {
       const orgsQuery = query(collection(db, "organizations"), where("inviteCode", "==", inviteCode.trim().toUpperCase()));
       const querySnapshot = await getDocs(orgsQuery);
@@ -864,17 +879,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       const orgDoc = querySnapshot.docs[0]; 
-      const organization = { id: orgDoc.id, ...orgDoc.data() } as Organization;
+      const organizationData = orgDoc.data();
+      const organization: Organization = { 
+          id: orgDoc.id, 
+          name: organizationData.name,
+          ownerId: organizationData.ownerId,
+          memberIds: organizationData.memberIds || [],
+          teamIds: organizationData.teamIds || [],
+          createdAt: organizationData.createdAt?.toDate ? organizationData.createdAt.toDate().toISOString() : new Date().toISOString(),
+          description: organizationData.description,
+          inviteCode: organizationData.inviteCode,
+      };
+
 
       if (organization.memberIds.includes(currentUser.id)) {
         toast({ title: "Already a Member", description: `You are already a member of "${organization.name}".` });
         if(currentUser.defaultOrganizationId !== organization.id) {
-            await setCurrentOrganization(organization.id); // Set as default if joined and not already default
+            // Update default organization if already a member but not default
+            const userDocRefForDefaultUpdate = doc(db, "users", currentUser.id);
+            batch.update(userDocRefForDefaultUpdate, { defaultOrganizationId: organization.id });
+            setCurrentUser(prevUser => prevUser ? ({...prevUser, defaultOrganizationId: organization.id}) : null);
         }
+        await batch.commit(); // Commit if only default org update
         return organization;
       }
 
-      const batch = writeBatch(db);
+      
       const orgDocRef = doc(db, "organizations", organization.id);
       batch.update(orgDocRef, { memberIds: arrayUnion(currentUser.id) });
 
@@ -915,8 +945,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (currentUser.defaultOrganizationId) {
         usersQuery = query(usersCollectionRef, where('organizationMemberships', 'array-contains', currentUser.defaultOrganizationId));
     } else {
-        // If no default org, return empty or based on other criteria (e.g., direct contacts - not implemented)
-        // For now, we'll say chat is primarily org-based.
         return []; 
     }
 
