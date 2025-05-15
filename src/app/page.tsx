@@ -59,7 +59,7 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogTrigger, 
+  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { useToast } from '@/hooks/use-toast';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -69,16 +69,16 @@ import { useIsMobile } from '@/hooks/use-mobile';
 type ActiveView = 'board' | 'ai-assistant' | 'prioritize' | 'smart-create' | 'settings' | 'organizations' | 'teams' | 'chat';
 
 export default function Home() {
-  const { 
-    currentUser, loading: authLoading, logout, currentProvider, isGuest, exitGuestMode, 
+  const {
+    currentUser, loading: authLoading, logout, currentProvider, isGuest, exitGuestMode,
     createOrganization, createTeam, getUserOrganizations, getUserTeams, setCurrentOrganization, joinOrganizationByInviteCode
   } = useAuth();
   const router = useRouter();
   const [activeView, setActiveView] = useState<ActiveView>('board');
-  const { setOpen: setSidebarOpen } = useSidebar(); 
+  const { setOpen: setSidebarOpen } = useSidebar();
   const isMobile = useIsMobile();
 
-  const { 
+  const {
     boards, activeBoardId, setActiveBoardId, getActiveBoard, deleteBoard, addBoard: addTaskBoard, // Renamed to avoid conflict
     boardGroups, addBoardGroup, deleteBoardGroup, updateBoardGroupName, addBoardToGroup, removeBoardFromGroup, updateBoardGroupId
   } = useTasks();
@@ -109,11 +109,11 @@ export default function Home() {
   }, [currentUser, authLoading, isGuest, router]);
 
   useEffect(() => {
-    if ((currentUser || isGuest) && !activeBoardId && boards.length > 0) { 
+    if ((currentUser || isGuest) && !activeBoardId && boards.length > 0) {
       setActiveBoardId(boards[0].id);
     }
   }, [activeBoardId, boards, setActiveBoardId, currentUser, isGuest]);
-  
+
   const fetchUserOrgsAndTeams = useCallback(async () => {
     if (currentUser && !isGuest) {
         const orgs = await getUserOrganizations();
@@ -165,14 +165,14 @@ export default function Home() {
       default: return 'TaskZenith';
     }
   };
-  
+
   const handleRenameBoard = (board: Board) => {
     setBoardToRename(board);
     setIsRenameBoardDialogOpen(true);
   };
 
   const handleDeleteBoard = (boardId: string, boardName: string) => {
-    deleteBoard(boardId); 
+    deleteBoard(boardId);
     toast({
         title: "Board Deleted",
         description: `Board "${boardName}" has been successfully deleted.`,
@@ -199,7 +199,7 @@ export default function Home() {
 
   const handleMoveBoardToGroup = (boardId: string, groupId: string | null) => {
     if (groupId === "new_group") {
-        setIsCreateGroupDialogOpen(true); 
+        setIsCreateGroupDialogOpen(true);
         toast({ title: "Create Group", description: "Please create a new group first, then move the board."});
     } else if (groupId === "remove_from_group") {
         removeBoardFromGroup(boardId);
@@ -221,7 +221,7 @@ export default function Home() {
     if (currentUser?.email) return currentUser.email.charAt(0).toUpperCase();
     return "?";
   }
-  
+
   const getProviderIcon = () => {
     if (currentProvider === 'firebase') {
       return <Database className="h-3 w-3 text-orange-500" title="Firebase" />;
@@ -240,7 +240,7 @@ export default function Home() {
     setIsCreateTeamDialogOpen(true);
     if (isMobile) setSidebarOpen(false);
   };
-  
+
   const handleSetCurrentOrg = async (orgId: string | null) => {
     await setCurrentOrganization(orgId);
     // Re-fetch teams after changing org context
@@ -293,8 +293,8 @@ export default function Home() {
                     <DropdownMenuSeparator />
                     {userOrganizations.length === 0 && <DropdownMenuItem disabled>No organizations yet.</DropdownMenuItem>}
                     {userOrganizations.map(org => (
-                      <DropdownMenuItem 
-                        key={org.id} 
+                      <DropdownMenuItem
+                        key={org.id}
                         onClick={() => handleSetCurrentOrg(org.id)}
                         className={cn(org.id === currentUser.defaultOrganizationId && "bg-accent text-accent-foreground")}
                       >
@@ -353,9 +353,9 @@ export default function Home() {
                         <SidebarMenuButton
                             tooltip="Board Groups"
                             className="w-full hover:bg-sidebar-accent/80 dark:hover:bg-sidebar-accent/50"
-                            disabled={authLoading && !currentUser && !isGuest} 
+                            disabled={authLoading && !currentUser && !isGuest}
                         >
-                            <Folders /> 
+                            <Folders />
                             Board Groups
                         </SidebarMenuButton>
                     </DropdownMenuTrigger>
@@ -364,7 +364,7 @@ export default function Home() {
                         <DropdownMenuSeparator />
                         {boardGroups.length === 0 && <DropdownMenuItem disabled>No groups yet.</DropdownMenuItem>}
                         {boardGroups.map(group => (
-                           <AlertDialog key={group.id}> 
+                           <AlertDialog key={group.id}>
                             <DropdownMenuSub>
                                 <DropdownMenuSubTrigger className="justify-between">
                                     <span>{group.name} ({group.boardIds.length})</span>
@@ -432,7 +432,7 @@ export default function Home() {
                         <SidebarMenuButton
                             tooltip="My Boards"
                             className="w-full hover:bg-sidebar-accent/80 dark:hover:bg-sidebar-accent/50"
-                            disabled={authLoading && !currentUser && !isGuest} 
+                            disabled={authLoading && !currentUser && !isGuest}
                         >
                             <FolderKanban />
                             My Boards
@@ -443,7 +443,7 @@ export default function Home() {
                         <DropdownMenuSeparator />
                         {boards.length === 0 && <DropdownMenuItem disabled>No boards yet.</DropdownMenuItem>}
                         {boards.map(board => (
-                           <AlertDialog key={board.id}> 
+                           <AlertDialog key={board.id}>
                             <DropdownMenuSub>
                                 <DropdownMenuSubTrigger
                                     className={cn("justify-between", board.id === activeBoardId && "bg-accent text-accent-foreground")}
@@ -470,8 +470,8 @@ export default function Home() {
                                             </DropdownMenuSubTrigger>
                                             <DropdownMenuPortal>
                                                 <DropdownMenuSubContent>
-                                                    <DropdownMenuRadioGroup 
-                                                        value={board.groupId || "ungrouped"} 
+                                                    <DropdownMenuRadioGroup
+                                                        value={board.groupId || "ungrouped"}
                                                         onValueChange={(value) => handleMoveBoardToGroup(board.id, value === "ungrouped" ? "remove_from_group" : value)}
                                                     >
                                                         {board.groupId && (
@@ -667,7 +667,7 @@ export default function Home() {
         <header className="flex items-center justify-between p-4 border-b shadow-sm bg-card/50 backdrop-blur-sm sticky top-0 z-20"> {/* Increased z-index */}
            <SidebarTrigger />
            <h1 className="text-xl font-semibold">{getHeaderText()}</h1>
-           <div className={cn("w-7 h-7", isMobile && "md:hidden")}> 
+           <div className={cn("w-7 h-7", isMobile && "md:hidden")}>
              {isMobile && activeView === 'board' && (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
@@ -688,7 +688,7 @@ export default function Home() {
            </div>
          </header>
         <main className="flex-1 overflow-y-auto p-1 sm:p-4 bg-secondary/20 dark:bg-neutral-900/50">
-          {activeView === 'board' && (activeBoardId ? <KanbanBoard /> : 
+          {activeView === 'board' && (activeBoardId ? <KanbanBoard /> :
             <div className="flex flex-col items-center justify-center h-full text-center p-4">
                 <FolderKanban className="w-24 h-24 text-muted-foreground mb-4" />
                 <h2 className="text-2xl font-semibold mb-2">No Board Selected</h2>
@@ -750,17 +750,17 @@ export default function Home() {
           )}
         </main>
       </SidebarInset>
-      <CreateBoardDialog 
-        open={isCreateBoardDialogOpen} 
-        onOpenChange={setIsCreateBoardDialogOpen} 
+      <CreateBoardDialog
+        open={isCreateBoardDialogOpen}
+        onOpenChange={setIsCreateBoardDialogOpen}
         targetGroupId={targetGroupIdForNewBoard}
       />
       <RenameBoardDialog board={boardToRename} open={isRenameBoardDialogOpen} onOpenChange={setIsRenameBoardDialogOpen} />
       <BoardThemeCustomizer board={getActiveBoard()} open={isThemeCustomizerOpen} onOpenChange={setIsThemeCustomizerOpen} />
       <CreateBoardGroupDialog open={isCreateGroupDialogOpen} onOpenChange={setIsCreateGroupDialogOpen} />
       <RenameBoardGroupDialog group={groupToRename} open={isRenameGroupDialogOpen} onOpenChange={setIsRenameGroupDialogOpen} />
-      <CreateOrganizationDialog 
-        open={isCreateOrgDialogOpen} 
+      <CreateOrganizationDialog
+        open={isCreateOrgDialogOpen}
         onOpenChange={(isOpen) => {
             setIsCreateOrgDialogOpen(isOpen);
             if(isOpen === false) fetchUserOrgsAndTeams();
