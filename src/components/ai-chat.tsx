@@ -1,4 +1,3 @@
-
 'use client';
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
@@ -14,10 +13,10 @@ import {
   type ChatOutput,
   type TaskAction,
   type PreferenceUpdate,
-  type MessageHistoryItem // Changed from ToolCallRequest due to previous simplification
 } from '@/ai/flows/chat-flow';
-// import { nameChatSession } from '@/ai/flows/name-chat-session-flow'; // Removed for simplification
-import type { AiChatSession } from '@/types'; // AiChatSession might be unused if we revert to single history
+// nameChatSession is removed for now, will use default naming.
+// import { nameChatSession } from '@/ai/flows/name-chat-session-flow'; 
+import type { MessageHistoryItem, AiChatSession } from '@/types';
 import { useTasks } from '@/contexts/TaskContext';
 import { useSettings } from '@/contexts/SettingsContext';
 import { useAuth } from '@/contexts/AuthContext';
@@ -31,34 +30,30 @@ import {
   deleteAiChatSession,
   getAiChatSessionMessages,
 } from '@/services/aiChatService';
-import { doc, getDoc, updateDoc, serverTimestamp } from 'firebase/firestore'; // For single chat history
-import { db } from '@/lib/firebase'; // For single chat history
+import { formatISO } from 'date-fns';
 
 
 interface DisplayMessage {
   id: string;
-  sender: 'user' | 'ai' | 'system' ; // Removed 'tool_code' for simplification
+  sender: 'user' | 'ai' | 'system' ;
   text: string | React.ReactNode;
   timestamp: number;
-  // toolCalls?: ToolCallRequest[]; // Re-evaluate if needed with simplified chat-flow
 }
 
 const MAX_HISTORY_FOR_AI = 20;
-// const MIN_MESSAGES_FOR_AUTONAME = 4; // No longer needed for AI naming
+const MIN_MESSAGES_FOR_AUTOSAVE_NEW_CHAT = 1; // Save after 1st user message and AI response cycle
 
 export function AiChat() {
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [inputValue, setInputValue] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+  const [isLoading, setIsLoading] = useState(false); // For AI response loading
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false); // For loading session messages
   
-  // Simplified: No activeSessionId or activeSessionName for single chat history model
-  // const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
-  // const [activeSessionName, setActiveSessionName] = useState<string>("New Chat");
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [activeSessionName, setActiveSessionName] = useState<string>("New Chat");
 
-  // For listing multiple sessions - keep for future, but functionality might be paused
   const [savedSessions, setSavedSessions] = useState<AiChatSession[]>([]);
-  const [isLoadingSessions, setIsLoadingSessions] = useState(true);
+  const [isLoadingSessions, setIsLoadingSessions] = useState(true); // For loading session list
 
 
   const scrollAreaRef = useRef<HTMLDivElement>(null);
@@ -74,68 +69,38 @@ export function AiChat() {
     if (viewport) {
       setTimeout(() => {
         viewport.scrollTo({ top: viewport.scrollHeight, behavior: 'smooth' });
-      }, 100);
+      }, 100); // Small delay to ensure DOM update
     }
   }, []);
-
-  // Load initial/last chat history (single session model)
+  
   useEffect(() => {
-    if (currentUser && !isGuest) {
-      setIsLoadingHistory(true);
-      const userDocRef = doc(db, 'users', currentUser.id);
-      getDoc(userDocRef).then(docSnap => {
-        if (docSnap.exists()) {
-          const userData = docSnap.data();
-          if (userData.aiChatHistory && Array.isArray(userData.aiChatHistory.messages)) {
-            setMessages(convertHistoryItemsToDisplayMessages(userData.aiChatHistory.messages));
-          } else {
-            setMessages([]); // Start fresh if no history or malformed
-          }
-        } else {
-          setMessages([]);
-        }
-      }).catch(error => {
-        console.error("Error loading single chat history:", error);
-        setMessages([]);
-      }).finally(() => {
-        setIsLoadingHistory(false);
-        scrollToBottom();
-      });
-    } else {
-      // For guests, chat is ephemeral or could use localStorage if needed later
-      setMessages([]);
-      setIsLoadingHistory(false);
-    }
-  }, [currentUser, isGuest]);
+    scrollToBottom();
+  }, [messages, scrollToBottom]);
 
-
-  // Fetch list of saved sessions (for sidebar, if we re-enable multi-session browsing)
-  // This part is currently not fully utilized if we stick to single-session view
+  // Fetch list of saved sessions
   useEffect(() => {
     if (currentUser && !isGuest) {
       setIsLoadingSessions(true);
       const unsubscribe = getAiChatSessionsStream(currentUser.id, (fetchedSessions) => {
         setSavedSessions(fetchedSessions);
         setIsLoadingSessions(false);
+        // If there's no active session and sessions are loaded, maybe select the latest one?
+        // Or leave it on "New Chat" - current behavior.
       });
       return () => unsubscribe();
     } else {
       setSavedSessions([]);
       setIsLoadingSessions(false);
+      handleNewChat(); // Reset to new chat for guest or if user logs out
     }
   }, [currentUser, isGuest]);
 
-
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages, scrollToBottom]);
-
   const convertDisplayMessagesToHistoryItems = (displayMessages: DisplayMessage[]): MessageHistoryItem[] => {
     return displayMessages
-      .filter(msg => msg.sender === 'user' || msg.sender === 'ai')
+      .filter(msg => (msg.sender === 'user' || msg.sender === 'ai') && typeof msg.text === 'string')
       .map(msg => ({
         role: msg.sender === 'user' ? 'user' : 'model',
-        parts: [{ text: typeof msg.text === 'string' ? msg.text : 'Structured AI Message' }]
+        parts: [{ text: typeof msg.text === 'string' ? msg.text : 'Structured AI Message' }] // Ensure text is string
       }));
   };
   
@@ -148,25 +113,34 @@ export function AiChat() {
     }));
   };
 
-  // Simplified saveChatHistory for single session model
-  const saveChatHistory = useCallback(async (currentDisplayMessages: DisplayMessage[]) => {
+  const saveOrUpdateSession = useCallback(async (currentDisplayMessages: DisplayMessage[]) => {
     if (!currentUser || isGuest || currentDisplayMessages.length === 0) return;
 
     const historyForFirestore = convertDisplayMessagesToHistoryItems(currentDisplayMessages);
-    const userDocRef = doc(db, 'users', currentUser.id);
+    if(historyForFirestore.length === 0 && !activeSessionId) return; // Don't save empty new chats
 
-    try {
-      await updateDoc(userDocRef, {
-        aiChatHistory: {
-          messages: historyForFirestore,
-          lastUpdatedAt: serverTimestamp() 
+    if (activeSessionId) { // Existing session
+      await updateAiChatSession(currentUser.id, activeSessionId, historyForFirestore, activeSessionName);
+    } else { // New session
+      // Only save new session if it has at least MIN_MESSAGES_FOR_AUTOSAVE_NEW_CHAT from user + AI cycle
+      const userMessagesCount = currentDisplayMessages.filter(m => m.sender === 'user').length;
+      if (userMessagesCount >= MIN_MESSAGES_FOR_AUTOSAVE_NEW_CHAT) {
+        let newSessionName = "New Chat";
+        const firstUserMessage = currentDisplayMessages.find(m => m.sender === 'user');
+        if (firstUserMessage && typeof firstUserMessage.text === 'string' && firstUserMessage.text.trim() !== '') {
+          newSessionName = firstUserMessage.text.trim().split(' ').slice(0, 5).join(' ') + (firstUserMessage.text.trim().split(' ').length > 5 ? '...' : '');
+        } else {
+          newSessionName = `Chat - ${new Date().toLocaleDateString()}`;
         }
-      });
-    } catch (error) {
-      console.error("Error saving single chat history:", error);
-      // Optionally toast an error, but might be too noisy for background saves
+        
+        const newId = await createAiChatSession(currentUser.id, newSessionName, historyForFirestore);
+        if (newId) {
+          setActiveSessionId(newId);
+          setActiveSessionName(newSessionName);
+        }
+      }
     }
-  }, [currentUser, isGuest]);
+  }, [currentUser, isGuest, activeSessionId, activeSessionName]);
 
 
   const prepareBoardContext = (): ChatInput['activeBoardContext'] => {
@@ -211,6 +185,28 @@ export function AiChat() {
       }
     }
 
+    if (action.type === 'createTask' && action.taskDetails) {
+        const firstColumnId = activeBoard.columns.length > 0 ? activeBoard.columns[0].id : undefined;
+        if (!firstColumnId) {
+            toast({ title: "Task Creation Failed", description: "No columns available to add the task.", variant: "destructive" });
+            addSystemMessage("I couldn't create the task because there are no columns on your board.");
+            return;
+        }
+        const newTaskData = {
+            content: action.taskDetails.content,
+            priority: action.taskDetails.priority || 'medium',
+            deadline: action.taskDetails.deadline,
+            description: action.taskDetails.description, // Assuming taskDetails might have description
+        };
+        // useTasks().addTask(newTaskData, action.taskDetails.status || firstColumnId); // Assuming addTask can take target status
+        // For simplicity, let's assume addTask adds to the first column or a specified one
+        useTasks().addTask(newTaskData, firstColumnId); 
+        toast({ title: "Task Created", description: `Task "${action.taskDetails.content}" created.` });
+        addSystemMessage(`I've created the task: "${action.taskDetails.content}".`);
+        return;
+    }
+
+
     if (!foundTask || !sourceColumn) {
       toast({ title: "Task Not Found", description: `Could not find task: "${action.taskIdentifier}".`, variant: "destructive" });
       addSystemMessage(`I couldn't find the task "${action.taskIdentifier}" on your board. Could you be more specific or check the task name/ID?`);
@@ -218,7 +214,7 @@ export function AiChat() {
     }
 
     if (action.type === 'updateStatus') {
-      const targetColumn = activeBoard.columns.find(col => col.title.toLowerCase() === action.targetValue.toLowerCase());
+      const targetColumn = activeBoard.columns.find(col => col.title.toLowerCase() === action.targetValue?.toLowerCase());
       if (!targetColumn) {
         toast({ title: "Status Not Found", description: `Could not find status/column: "${action.targetValue}".`, variant: "destructive" });
         addSystemMessage(`I couldn't find the column "${action.targetValue}" on your board. Available columns are: ${activeBoard.columns.map(c => c.title).join(', ')}.`);
@@ -259,36 +255,45 @@ export function AiChat() {
     setMessages(prev => [...prev, systemMessage]);
   };
   
-  // These handlers are for multi-session UI, which is currently de-emphasized
-  // but kept for potential future re-integration.
   const handleSelectSession = async (sessionId: string, sessionName: string) => {
-    // This would load messages for sessionId and set them to `messages`
-    // For now, it's a placeholder if we're in single-session mode
-    console.log("Session selected (multi-session UI placeholder):", sessionId, sessionName);
-    toast({ title: "Info", description: "Multi-session browsing not fully active in this version."});
+    if (!currentUser) return;
+    setIsLoadingHistory(true);
+    setMessages([]); // Clear current messages before loading new ones
+    try {
+      const fetchedMessages = await getAiChatSessionMessages(currentUser.id, sessionId);
+      setMessages(convertHistoryItemsToDisplayMessages(fetchedMessages));
+      setActiveSessionId(sessionId);
+      setActiveSessionName(sessionName);
+    } catch (error) {
+      console.error("Error loading session messages:", error);
+      toast({title: "Load Error", description: "Could not load chat history.", variant: "destructive"});
+      setMessages([]); // Ensure messages are cleared on error
+      setActiveSessionId(null); // Reset active session on error
+      setActiveSessionName("New Chat");
+    } finally {
+      setIsLoadingHistory(false);
+      scrollToBottom();
+      inputRef.current?.focus();
+    }
   };
 
   const handleNewChat = () => {
-    // For single-session, this means clearing current messages and starting fresh
+    setActiveSessionId(null);
+    setActiveSessionName("New Chat");
     setMessages([]);
-    // activeSessionId = null; // Not used in single-session
-    // activeSessionName = "New Chat"; // Not used in single-session
+    setInputValue('');
     inputRef.current?.focus();
-    toast({title: "New Chat Started"});
   };
 
-  const handleDeleteCurrentSession = async (sessionIdToDelete: string) => {
-    // This would delete a specific session from the list
-    // For single-session mode, this isn't directly applicable for the current view
-    console.log("Delete session (multi-session UI placeholder):", sessionIdToDelete);
-     if (!currentUser || !sessionIdToDelete) return;
+  const handleDeleteSession = async (sessionIdToDelete: string) => {
+    if (!currentUser || !sessionIdToDelete) return;
     try {
       await deleteAiChatSession(currentUser.id, sessionIdToDelete);
-      // If active session is deleted, call handleNewChat() for single-session model.
-      // This might require knowing if the deleted session was somehow "active"
-      // or simply clearing the current view.
-      handleNewChat(); 
       toast({ title: "Chat Deleted", description: `Chat session has been deleted.` });
+      if (activeSessionId === sessionIdToDelete) {
+        handleNewChat(); 
+      }
+      // The session list will auto-update via its stream listener
     } catch (error) {
       console.error("Error deleting session:", error);
       toast({ title: "Deletion Failed", description: "Could not delete the chat session.", variant: "destructive"});
@@ -326,6 +331,8 @@ export function AiChat() {
         timestamp: Date.now(),
     };
     setMessages(prev => [...prev, thinkingMessage]);
+    scrollToBottom();
+
 
     const historyForAI: MessageHistoryItem[] = convertDisplayMessagesToHistoryItems(currentMessagesWithUser)
       .slice(-MAX_HISTORY_FOR_AI);
@@ -341,15 +348,11 @@ export function AiChat() {
       const aiResponse: ChatOutput | null = await chatWithAI(aiInput);
 
       let aiTextResponse: string | React.ReactNode;
-      let finalToolCalls;
-
       if (aiResponse && typeof aiResponse.response === 'string') {
         aiTextResponse = aiResponse.response;
-        finalToolCalls = aiResponse.toolCalls;
       } else {
         console.error('Invalid AI response structure from chatWithAI:', aiResponse);
         aiTextResponse = ( <span className="text-destructive"> Sorry, Jack could not process that. Please try again. (Response Error) </span> );
-        finalToolCalls = undefined;
       }
       
       const aiResponseMessage: DisplayMessage = {
@@ -357,18 +360,16 @@ export function AiChat() {
         sender: 'ai',
         text: aiTextResponse,
         timestamp: Date.now(),
-        // toolCalls: finalToolCalls, // toolCalls are not directly part of DisplayMessage anymore
       };
       
-      // Replace thinking message with actual response or error
       setMessages(prevMessages => 
         prevMessages.map(msg => msg.id === thinkingMessageId ? aiResponseMessage : msg)
       );
       
-      // Save the updated conversation (including user and AI message)
-      // The messages array passed to saveChatHistory should be the one *after* the AI response.
-      const messagesToSave = [...currentMessagesWithUser.filter(msg => msg.id !== thinkingMessageId), aiResponseMessage];
-      await saveChatHistory(messagesToSave);
+      const messagesToSave = currentMessagesWithUser.map(msg => msg.id === thinkingMessageId ? aiResponseMessage : msg);
+      // Filter out the placeholder if it was replaced by the actual AI message
+      const finalMessagesToSave = messagesToSave.filter(msg => !(msg.id === thinkingMessageId && typeof msg.text !== 'string'));
+      await saveOrUpdateSession(finalMessagesToSave);
 
 
       if (aiResponse?.taskAction) {
@@ -377,12 +378,9 @@ export function AiChat() {
       if (aiResponse?.preferenceUpdate) {
         handlePreferenceUpdate(aiResponse.preferenceUpdate);
       }
-      // Tool call display simplified, as `toolCalls` isn't on DisplayMessage.
-      // Could add a system message if `aiResponse.toolCalls` exists.
       if (aiResponse?.toolCalls && aiResponse.toolCalls.length > 0) {
-         addSystemMessage(`Jack attempted to use a tool: ${aiResponse.toolCalls[0].name}.`);
+         addSystemMessage(`Jack attempted to use a tool: ${aiResponse.toolCalls[0].name}. (Tool functionality is currently placeholder).`);
       }
-
 
     } catch (error) {
       console.error('Error fetching AI response in AiChat.tsx:', error);
@@ -396,6 +394,7 @@ export function AiChat() {
       setMessages(prevMessages => 
         prevMessages.map(msg => msg.id === thinkingMessageId ? errorDisplayMessage : msg)
       );
+      await saveOrUpdateSession(messages.map(msg => msg.id === thinkingMessageId ? errorDisplayMessage : msg));
     } finally {
       setIsLoading(false);
       inputRef.current?.focus();
@@ -406,25 +405,23 @@ export function AiChat() {
 
   return (
     <Card className="flex h-full w-full shadow-2xl overflow-hidden rounded-xl">
-      {/* Session List Sidebar - Kept for potential future re-integration */}
       <div className="w-1/3 min-w-[250px] max-w-[320px] border-r border-border dark:border-neutral-700 hidden md:flex flex-col">
         <AiChatSessionList
-          sessions={savedSessions} // This will be empty or not fully functional if multi-session is paused
+          sessions={savedSessions}
           currentUserId={currentUser?.id || null}
-          activeSessionId={null} // No active session ID in single-session mode
-          onSelectSession={handleSelectSession} // Placeholder
-          onNewChat={handleNewChat} // Clears current chat
-          onDeleteSession={handleDeleteCurrentSession} // Placeholder
+          activeSessionId={activeSessionId}
+          onSelectSession={handleSelectSession}
+          onNewChat={handleNewChat}
+          onDeleteSession={handleDeleteSession}
           isLoadingSessions={isLoadingSessions}
         />
       </div>
 
-      {/* Main Chat Area */}
       <div className="flex flex-col flex-1">
         <CardHeader className="border-b bg-card/80 backdrop-blur-md sticky top-0 z-10">
           <CardTitle className="flex items-center gap-2 text-lg font-semibold">
-            <Bot className="h-6 w-6 text-primary" /> AI Assistant (Jack)
-            {/* activeSessionName removed for single-session simplicity */}
+            <Bot className="h-6 w-6 text-primary" /> 
+            {activeSessionId ? activeSessionName : "AI Assistant (Jack)"}
           </CardTitle>
         </CardHeader>
         <CardContent className="flex-1 p-0">
@@ -443,10 +440,9 @@ export function AiChat() {
                     'flex items-end gap-3 animate-fadeInUp',
                     message.sender === 'user' ? 'justify-end' : 'justify-start',
                     message.sender === 'system' && 'justify-center'
-                    // message.sender === 'tool_code' && 'justify-center my-2' // tool_code sender removed
                   )}
                 >
-                  {message.sender === 'ai' && message.sender !== 'system' && ( // tool_code sender removed
+                  {message.sender === 'ai' && message.sender !== 'system' && ( 
                     <Avatar className="h-9 w-9 border-2 border-primary/50 shadow-md shrink-0">
                        <AvatarFallback className="bg-primary/10"><Bot className="h-5 w-5 text-primary" /></AvatarFallback>
                     </Avatar>
@@ -465,20 +461,13 @@ export function AiChat() {
                           'max-w-[85%] sm:max-w-[80%] rounded-2xl p-3.5 text-sm shadow-lg transition-all duration-300 ease-in-out hover:shadow-xl hover:scale-[1.01]',
                           message.sender === 'user'
                           ? 'bg-primary text-primary-foreground rounded-br-lg'
-                          // : message.sender === 'tool_code' // tool_code sender removed
-                          // ? 'bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-200 border border-amber-300 dark:border-amber-700 rounded-lg w-full sm:w-auto'
                           : 'bg-muted text-muted-foreground rounded-bl-lg dark:bg-neutral-700 dark:text-neutral-100'
                       )}
                       >
-                      {/* {message.sender === 'tool_code' && typeof message.text === 'string' ? ( // tool_code sender removed
-                          <pre className="whitespace-pre-wrap text-xs p-2 bg-black/5 dark:bg-white/5 rounded">
-                              <code>{message.text}</code>
-                          </pre>
-                      ) : null} */}
-                      {typeof message.text === 'string' ? ( // Simplified: always treat text as string or ReactNode
+                      {typeof message.text === 'string' ? (
                           <p className="whitespace-pre-wrap leading-relaxed break-words">{message.text}</p>
                       ) : (
-                          message.text
+                          message.text // For ReactNode elements like loading spinner
                       )}
                       </div>
                   )}
@@ -500,11 +489,11 @@ export function AiChat() {
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               placeholder="Ask Jack..."
-              disabled={isLoading || isLoadingHistory}
+              disabled={isLoading || isLoadingHistory || isLoadingSessions}
               className="flex-1 h-10 sm:h-11 text-sm sm:text-base transition-shadow duration-200 focus:shadow-xl focus:border-primary/50 rounded-lg"
               autoComplete="off"
             />
-            <Button type="submit" size="icon" className="h-10 w-10 sm:h-11 sm:w-11 rounded-lg transition-all duration-150 ease-in-out hover:bg-primary/90 active:scale-95 shadow-md hover:shadow-lg" disabled={isLoading || isLoadingHistory || !inputValue.trim()} >
+            <Button type="submit" size="icon" className="h-10 w-10 sm:h-11 sm:w-11 rounded-lg transition-all duration-150 ease-in-out hover:bg-primary/90 active:scale-95 shadow-md hover:shadow-lg" disabled={isLoading || isLoadingHistory || isLoadingSessions || !inputValue.trim()} >
               <Send className="h-4 w-4 sm:h-5 sm:w-5" />
               <span className="sr-only">Send message</span>
             </Button>
@@ -514,4 +503,3 @@ export function AiChat() {
     </Card>
   );
 }
-
