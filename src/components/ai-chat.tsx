@@ -16,7 +16,7 @@ import {
   type PreferenceUpdate,
   type ToolCallRequest,
 } from '@/ai/flows/chat-flow';
-import type { MessageHistoryItem, AiChatSession } from '@/types';
+import type { MessageHistoryItem, AiChatSession, BoardContextTask as BoardContextTaskType } from '@/types';
 import { useTasks } from '@/contexts/TaskContext';
 import { useSettings } from '@/contexts/SettingsContext';
 import { useAuth } from '@/contexts/AuthContext';
@@ -40,20 +40,20 @@ interface DisplayMessage {
   timestamp: number;
 }
 
-const MAX_HISTORY_FOR_AI = 20; // Max messages sent to AI model
-const MIN_MESSAGES_FOR_NEW_SESSION_SAVE = 1; // Minimum USER messages before a new session is auto-saved.
+const MAX_HISTORY_FOR_AI = 20; 
+const MIN_MESSAGES_FOR_NEW_SESSION_SAVE = 1; 
 
 export function AiChat() {
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [inputValue, setInputValue] = useState('');
-  const [isLoading, setIsLoading] = useState(false); // For AI response loading
-  const [isLoadingHistory, setIsLoadingHistory] = useState(false); // For loading session messages
+  const [isLoading, setIsLoading] = useState(false); 
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false); 
 
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [activeSessionName, setActiveSessionName] = useState<string>("New Chat");
 
   const [savedSessions, setSavedSessions] = useState<AiChatSession[]>([]);
-  const [isLoadingSessions, setIsLoadingSessions] = useState(true); // For loading session list
+  const [isLoadingSessions, setIsLoadingSessions] = useState(true); 
 
 
   const scrollAreaRef = useRef<HTMLDivElement>(null);
@@ -69,7 +69,7 @@ export function AiChat() {
     if (viewport) {
       setTimeout(() => {
         viewport.scrollTo({ top: viewport.scrollHeight, behavior: 'smooth' });
-      }, 150); // Adjusted delay for DOM updates
+      }, 150); 
     }
   }, []);
 
@@ -104,7 +104,7 @@ export function AiChat() {
 
   const convertHistoryItemsToDisplayMessages = useCallback((historyItems: MessageHistoryItem[]): DisplayMessage[] => {
     return historyItems.map((item, index) => ({
-      id: `hist-${Date.now()}-${index}-${Math.random()}`, // Ensure unique ID
+      id: `hist-${Date.now()}-${index}-${Math.random()}`, 
       sender: item.role === 'model' ? 'ai' : 'user',
       text: item.parts[0]?.text || '',
       timestamp: Date.now() - (historyItems.length - index) * 1000,
@@ -114,14 +114,14 @@ export function AiChat() {
   const saveOrUpdateSession = useCallback(async (historyToSave: MessageHistoryItem[]) => {
     if (!currentUser || isGuest || historyToSave.length === 0) return;
 
-    const historyForFirestore = historyToSave; // Already in correct format
+    const historyForFirestore = historyToSave; 
 
     if (historyForFirestore.length === 0 && !activeSessionId) return;
 
     if (activeSessionId) {
       await updateAiChatSession(currentUser.id, activeSessionId, historyForFirestore, activeSessionName);
     } else {
-      // Check if there's at least MIN_MESSAGES_FOR_NEW_SESSION_SAVE user messages
+      
       const userMessagesInHistory = historyForFirestore.filter(m => m.role === 'user');
       if (userMessagesInHistory.length >= MIN_MESSAGES_FOR_NEW_SESSION_SAVE) {
         let newSessionName = "New Chat";
@@ -148,13 +148,21 @@ export function AiChat() {
     if (!currentActiveBoard) return undefined;
 
     const tasks = currentActiveBoard.columns.flatMap(col =>
-      col.tasks.map(task => ({
-        id: task.id,
-        content: task.content,
-        statusTitle: col.title,
-        priority: task.priority,
-        deadline: task.deadline,
-      }))
+      col.tasks.map(task => {
+        const taskForAI: Partial<BoardContextTaskType> & { id: string; content: string; statusTitle: string } = {
+          id: task.id,
+          content: task.content,
+          statusTitle: col.title,
+        };
+        if (task.priority) {
+          taskForAI.priority = task.priority;
+        }
+        // Only include deadline if it's a non-null, non-empty string (valid ISO string)
+        if (task.deadline && typeof task.deadline === 'string' && task.deadline.trim() !== '') {
+          taskForAI.deadline = task.deadline;
+        }
+        return taskForAI as BoardContextTaskType; // Cast after conditional properties
+      })
     );
     const columnNames = currentActiveBoard.columns.map(col => col.title);
     return { boardName: currentActiveBoard.name, tasks, columnNames };
@@ -196,7 +204,7 @@ export function AiChat() {
             content: action.taskDetails.content,
             priority: action.taskDetails.priority || 'medium',
             deadline: action.taskDetails.deadline,
-            description: action.taskDetails.description,
+            // description: action.taskDetails.description, // Assuming description might come from AI
         };
         addBoardTask(newTaskData, firstColumnId);
         toast({ title: "Task Created", description: `Task "${action.taskDetails.content}" created.` });
@@ -254,7 +262,7 @@ export function AiChat() {
   };
 
   const handleSelectSession = async (sessionId: string, sessionName: string) => {
-    if (!currentUser || activeSessionId === sessionId) return; // Don't reload if already active
+    if (!currentUser || activeSessionId === sessionId) return; 
     setIsLoadingHistory(true);
     setMessages([]);
     try {
@@ -291,7 +299,6 @@ export function AiChat() {
       if (activeSessionId === sessionIdToDelete) {
         handleNewChat();
       }
-      // The session list will auto-update via its stream listener in AiChatSessionList
     } catch (error) {
       console.error("Error deleting session:", error);
       toast({ title: "Deletion Failed", description: "Could not delete the chat session.", variant: "destructive"});
@@ -311,11 +318,10 @@ export function AiChat() {
       timestamp: Date.now(),
     };
 
-    // This history is for AI input. It converts current display messages to history items.
     const currentDisplayMessagesForAI = [...messages, userMessage];
     const historyForAIInput = convertDisplayMessagesToHistoryItems(currentDisplayMessagesForAI).slice(-MAX_HISTORY_FOR_AI);
 
-    setMessages(currentDisplayMessagesForAI); // Update UI with user message immediately
+    setMessages(currentDisplayMessagesForAI); 
     setInputValue('');
     setIsLoading(true);
 
@@ -331,12 +337,12 @@ export function AiChat() {
         ),
         timestamp: Date.now(),
     };
-    setMessages(prev => [...prev, thinkingMessage]); // Add thinking message to UI
+    setMessages(prev => [...prev, thinkingMessage]); 
     scrollToBottom();
 
     const aiInput: ChatInput = {
       query: trimmedInput,
-      history: historyForAIInput, // Pass the converted and sliced history
+      history: historyForAIInput, 
       activeBoardContext: prepareBoardContext(),
       userPreferences: prepareUserPreferences(),
     };
@@ -357,20 +363,19 @@ export function AiChat() {
       }
       
       const aiResponseMessageForDisplay: DisplayMessage = {
-        id: thinkingMessageId, // Use thinkingMessageId to replace it
+        id: thinkingMessageId, 
         sender: 'ai',
         text: aiTextResponse,
         timestamp: Date.now(),
       };
       
-      // Replace thinking message with actual AI response in UI
       setMessages(prevMessages => 
         prevMessages.map(msg => msg.id === thinkingMessageId ? aiResponseMessageForDisplay : msg)
       );
       
-      // Construct the full history for saving, using the already prepared historyForAIInput and the new model response
       const fullHistoryForSaving: MessageHistoryItem[] = [
-        ...historyForAIInput, 
+        ...historyForAIInput.slice(0, -1), // All history *before* the current user message
+        { role: 'user', parts: [{ text: trimmedInput }] },
         { role: 'model', parts: [modelResponseMessagePart] }
       ];
       await saveOrUpdateSession(fullHistoryForSaving);
@@ -390,21 +395,20 @@ export function AiChat() {
       console.error('Error fetching AI response in AiChat.tsx:', error);
       const errorMessageText = error instanceof Error ? error.message : 'An unknown error occurred.';
       const errorDisplayMessageForChat: DisplayMessage = {
-        id: thinkingMessageId, // Use thinkingMessageId to replace it
+        id: thinkingMessageId, 
         sender: 'ai',
         text: ( <span className="text-destructive"> Sorry, Jack encountered an issue: {errorMessageText} </span> ),
         timestamp: Date.now(),
       };
       const modelErrorResponseMessagePart: { text: string } = { text: `Sorry, Jack encountered an issue: ${errorMessageText}` };
       
-      // Replace thinking message with error message in UI
       setMessages(prevMessages => 
         prevMessages.map(msg => msg.id === thinkingMessageId ? errorDisplayMessageForChat : msg)
       );
 
-      // Construct the full history for saving, using historyForAIInput and the error model response
       const fullHistoryForSavingOnError: MessageHistoryItem[] = [
-        ...historyForAIInput,
+        ...historyForAIInput.slice(0, -1),
+        { role: 'user', parts: [{ text: trimmedInput }] },
         { role: 'model', parts: [modelErrorResponseMessagePart] }
       ];
       await saveOrUpdateSession(fullHistoryForSavingOnError);
@@ -480,7 +484,7 @@ export function AiChat() {
                       {typeof message.text === 'string' ? (
                           <p className="whitespace-pre-wrap leading-relaxed break-words">{message.text}</p>
                       ) : (
-                          message.text // For ReactNode elements like loading spinner
+                          message.text 
                       )}
                       </div>
                   )}
