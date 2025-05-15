@@ -1,3 +1,4 @@
+
 // src/contexts/AuthContext.tsx
 'use client';
 
@@ -18,7 +19,7 @@ import {
 import { doc, getDoc, setDoc, updateDoc, serverTimestamp, Timestamp, collection, addDoc, arrayUnion, arrayRemove, writeBatch, query, where, getDocs, orderBy, limit } from 'firebase/firestore'; // Firestore imports
 import { useToast } from '@/hooks/use-toast';
 import { useRouter } from 'next/navigation';
-import type { Board, Task, Column, BoardGroup, Organization, Team, ChatRoom } from '@/types'; // Ensure types are available
+import type { Board, Task, Column, BoardGroup, Organization, Team, ChatRoom } from '@/types'; 
 import { formatISO } from 'date-fns';
 import type { InteractionStyle } from './SettingsContext';
 import type { MessageHistoryItem } from '@/ai/schemas';
@@ -29,12 +30,35 @@ const generateId = (prefix: string = 'id') => `${prefix}-${Date.now()}-${Math.ra
 
 // Helper to generate invite codes
 const generateInviteCode = (length: number = 5): string => {
-  const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'; // Using only uppercase and numbers for simpler codes
+  const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'; 
   let result = '';
   for (let i = 0; i < length; i++) {
     result += characters.charAt(Math.floor(Math.random() * characters.length));
   }
   return result;
+};
+
+const assignTaskStatusToDefaultColumns = (columns: Column[]): Column[] => {
+  return columns.map(col => ({
+    ...col,
+    id: col.id || generateId('col-default'),
+    title: col.title || 'Untitled Column',
+    wipLimit: col.wipLimit === undefined ? 0 : col.wipLimit,
+    tasks: Array.isArray(col.tasks) ? col.tasks.map(task => ({
+      ...task,
+      id: task.id || generateId('task-default'),
+      content: task.content || 'Untitled Task',
+      status: col.id || '', 
+      priority: task.priority || 'medium',
+      createdAt: task.createdAt || formatISO(new Date()),
+      checklist: Array.isArray(task.checklist) ? task.checklist.map(ci => ({ ...ci, id: ci.id || generateId('cl-item')})) : [],
+      dependencies: Array.isArray(task.dependencies) ? task.dependencies : [],
+      tags: Array.isArray(task.tags) ? task.tags : [],
+      assignedTo: Array.isArray(task.assignedTo) ? task.assignedTo : [],
+      description: task.description || undefined,
+      deadline: task.deadline || undefined,
+    })) : [],
+  }));
 };
 
 
@@ -43,22 +67,13 @@ const getDefaultColumnsForNewUser = (): Column[] => [
     id: generateId('col'),
     title: 'To Do',
     tasks: [
-      { id: generateId('task'), content: 'Welcome! Plan your day', status: '', priority: 'high', createdAt: formatISO(new Date()), dependencies:[], checklist:[], tags:[] },
+      { id: generateId('task'), content: 'Welcome! Plan your day', status: '', priority: 'high', createdAt: formatISO(new Date()), dependencies:[], checklist:[], tags:[], assignedTo: [] },
     ],
   },
-  { id: generateId('col'), title: 'In Progress', tasks: [] },
-  { id: generateId('col'), title: 'Done', tasks: [] },
+  { id: generateId('col'), title: 'In Progress', tasks: [], assignedTo: [] },
+  { id: generateId('col'), title: 'Done', tasks: [], assignedTo: [] },
 ];
 
-const assignTaskStatusToDefaultColumns = (columns: Column[]): Column[] => {
-  return columns.map(col => ({
-    ...col,
-    tasks: col.tasks.map(task => ({
-      ...task,
-      status: col.id,
-    }))
-  }));
-};
 
 const getDefaultBoardForNewUser = (): Board => ({
   id: generateId('board-user'),
@@ -66,7 +81,7 @@ const getDefaultBoardForNewUser = (): Board => ({
   columns: assignTaskStatusToDefaultColumns(getDefaultColumnsForNewUser()),
   createdAt: formatISO(new Date()),
   theme: {},
-  groupId: null, // Initialize groupId
+  groupId: null, 
   organizationId: null,
   teamId: null,
   isPublic: false,
@@ -80,7 +95,7 @@ const defaultUserSettings = {
 
 const defaultAiChatHistory = {
   messages: [] as MessageHistoryItem[],
-  lastUpdatedAt: serverTimestamp() as Timestamp, // Ensure lastUpdatedAt is part of the default
+  lastUpdatedAt: serverTimestamp() as Timestamp, 
 };
 
 
@@ -95,7 +110,7 @@ export interface AppUser {
   organizationMemberships?: string[];
   teamMemberships?: string[];
   defaultOrganizationId?: string | null;
-  chatRoomIds?: string[]; // Added for chat feature
+  chatRoomIds?: string[]; 
 }
 
 interface AuthContextType {
@@ -118,7 +133,7 @@ interface AuthContextType {
   getUserTeams: (organizationId?: string) => Promise<Team[]>;
   setCurrentOrganization: (organizationId: string | null) => Promise<void>;
   joinOrganizationByInviteCode: (inviteCode: string) => Promise<Organization | null>;
-  getUsersForChat: () => Promise<AppUser[]>; // New function for chat
+  getUsersForChat: () => Promise<AppUser[]>; 
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -149,7 +164,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     organizationMemberships: [],
     teamMemberships: [],
     defaultOrganizationId: null,
-    chatRoomIds: [], // Initialize chatRoomIds
+    chatRoomIds: [], 
   });
 
   const mapSupabaseUserToAppUser = (supabaseUser: SupabaseUser): AppUser => ({
@@ -161,7 +176,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     organizationMemberships: [],
     teamMemberships: [],
     defaultOrganizationId: null,
-    chatRoomIds: [], // Initialize chatRoomIds
+    chatRoomIds: [], 
   });
 
   const initializeFirestoreUserData = async (appUser: AppUser) => {
@@ -192,10 +207,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           settings: defaultUserSettings,
           aiChatHistory: defaultAiChatHistory,
           boardGroups: [] as BoardGroup[],
-          organizationMemberships: [],
-          teamMemberships: [],
-          defaultOrganizationId: null,
-          chatRoomIds: [],
+          organizationMemberships: [] as string[], // Initialize as empty array
+          teamMemberships: [] as string[],       // Initialize as empty array
+          defaultOrganizationId: null,      // Initialize as null
+          chatRoomIds: [] as string[],           // Initialize as empty array
         };
         console.log(`Firestore Init: Data for new user ${appUser.id}:`, JSON.stringify(newUserDocumentData, null, 2));
         await setDoc(userDocRef, newUserDocumentData);
@@ -213,8 +228,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           needsUpdate = true;
           console.log(`Firestore Init: User ${appUser.id} - boards missing or empty. Adding default board.`);
         } else {
+          // Ensure all boards have necessary fields, especially for collaboration
           updates.boards = userData.boards.map((board: Board) => ({
             ...board,
+            id: board.id || generateId('board-migrated'),
+            name: board.name || 'Untitled Board',
+            columns: assignTaskStatusToDefaultColumns(board.columns),
+            createdAt: board.createdAt || formatISO(new Date()),
+            theme: board.theme || {},
             groupId: board.groupId === undefined ? null : board.groupId,
             organizationId: board.organizationId === undefined ? null : board.organizationId,
             teamId: board.teamId === undefined ? null : board.teamId,
@@ -222,17 +243,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           }));
           if (JSON.stringify(updates.boards) !== JSON.stringify(userData.boards)) {
              needsUpdate = true;
-             console.log(`Firestore Init: User ${appUser.id} - updated boards with groupId/orgId/teamId.`);
+             console.log(`Firestore Init: User ${appUser.id} - updated boards structure.`);
           }
         }
-
-        if (!userData.activeBoardId && updates.boards && updates.boards.length > 0) {
+        
+        if ((!userData.activeBoardId && updates.boards && updates.boards.length > 0) || 
+            (userData.activeBoardId && updates.boards && !updates.boards.find((b: Board) => b.id === userData.activeBoardId) && updates.boards.length > 0)) {
           updates.activeBoardId = updates.boards[0].id;
           needsUpdate = true;
-        } else if (userData.activeBoardId && userData.boards && !userData.boards.find((b: Board) => b.id === userData.activeBoardId) && userData.boards.length > 0) {
-          updates.activeBoardId = userData.boards[0].id;
-          needsUpdate = true;
-          console.log(`Firestore Init: User ${appUser.id} - invalid activeBoardId. Resetting to first board.`);
+          console.log(`Firestore Init: User ${appUser.id} - activeBoardId was invalid or missing. Reset to first board.`);
         }
 
 
@@ -241,7 +260,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           needsUpdate = true;
         }
         
-        // Robust aiChatHistory initialization/migration
         let currentAiChatHistory = userData.aiChatHistory;
         let aiHistoryNeedsUpdate = false;
         if (!currentAiChatHistory || typeof currentAiChatHistory !== 'object') {
@@ -275,7 +293,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           updates.teamMemberships = [];
           needsUpdate = true;
         }
-        if (userData.defaultOrganizationId === undefined) {
+        if (userData.defaultOrganizationId === undefined) { // Check for undefined explicitly
           updates.defaultOrganizationId = null;
           needsUpdate = true;
         }
@@ -284,18 +302,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           needsUpdate = true;
         }
 
+        // Update profile info if changed
         if (appUser.email && userData.email !== appUser.email) {
             updates.email = appUser.email; needsUpdate = true;
         }
         if (appUser.displayName && userData.displayName !== appUser.displayName) {
             updates.displayName = appUser.displayName; needsUpdate = true;
         }
-        if (appUser.photoURL !== undefined && userData.photoURL !== appUser.photoURL) {
+        if (appUser.photoURL !== undefined && userData.photoURL !== appUser.photoURL) { // Check for undefined for photoURL
             updates.photoURL = appUser.photoURL || null; needsUpdate = true;
         }
-        if(userData.provider !== appUser.provider) {
+        if(userData.provider !== appUser.provider) { // Ensure provider is also updated if changed
             updates.provider = appUser.provider; needsUpdate = true;
         }
+
 
         if (needsUpdate) {
           console.log(`Firestore Init: Updating existing document for ${appUser.id} with changes:`, Object.keys(updates));
@@ -303,7 +323,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           console.log(`Firestore Init: SUCCESS - Document UPDATED for user: ${appUser.id}`);
         } else {
           console.log(`Firestore Init: No major field updates needed for ${appUser.id}. Updating lastLogin only.`);
-          await updateDoc(userDocRef, { lastLogin: serverTimestamp() as Timestamp });
+          await updateDoc(userDocRef, { lastLogin: serverTimestamp() as Timestamp }); // Still update lastLogin
         }
       }
     } catch (error) {
@@ -345,7 +365,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 organizationMemberships: userData.organizationMemberships || [],
                 teamMemberships: userData.teamMemberships || [],
                 defaultOrganizationId: userData.defaultOrganizationId || null,
-                chatRoomIds: userData.chatRoomIds || [], // Load chatRoomIds
+                chatRoomIds: userData.chatRoomIds || [], 
             };
         }
 
@@ -377,7 +397,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                     organizationMemberships: userData.organizationMemberships || [],
                     teamMemberships: userData.teamMemberships || [],
                     defaultOrganizationId: userData.defaultOrganizationId || null,
-                    chatRoomIds: userData.chatRoomIds || [], // Load chatRoomIds
+                    chatRoomIds: userData.chatRoomIds || [], 
                 };
             }
           setCurrentUser(finalAppUser);
@@ -405,6 +425,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [isGuest]);
 
   const commonLoginSuccess = async (appUser: AppUser, provider: AuthProviderType | 'google') => {
+    await initializeFirestoreUserData(appUser); // Ensure data is initialized/updated *before* setting state
     setCurrentUser(appUser);
     setCurrentProvider(provider);
     setIsGuest(false);
@@ -412,11 +433,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         localStorage.setItem(AUTH_PROVIDER_STORAGE_KEY, provider);
         localStorage.removeItem(GUEST_MODE_STORAGE_KEY);
     }
-    await initializeFirestoreUserData(appUser);
     router.push('/');
   };
 
   const commonSignupSuccess = async (appUser: AppUser, provider: AuthProviderType | 'google') => {
+    await initializeFirestoreUserData(appUser); // Ensure data is initialized/updated *before* setting state
     setCurrentUser(appUser);
     setCurrentProvider(provider);
     setIsGuest(false);
@@ -424,7 +445,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         localStorage.setItem(AUTH_PROVIDER_STORAGE_KEY, provider);
         localStorage.removeItem(GUEST_MODE_STORAGE_KEY);
     }
-    await initializeFirestoreUserData(appUser);
     router.push('/');
   };
 
@@ -437,7 +457,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await updateFirebaseProfile(userCredential.user, { displayName });
 
       const appUser = mapFirebaseUserToAppUser(userCredential.user);
-      appUser.displayName = displayName;
+      appUser.displayName = displayName; // Make sure this is set on the AppUser object
 
       toast({ title: 'Firebase Signup Successful', description: 'Welcome aboard!' });
       await commonSignupSuccess(appUser, 'firebase');
@@ -513,7 +533,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         password,
         options: {
           data: {
-            displayName: email.split('@')[0]
+            displayName: email.split('@')[0] // Store displayName in Supabase user_metadata
           }
         }
       });
@@ -608,33 +628,41 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setLoading(true);
     try {
         const inviteCode = generateInviteCode();
-        const newOrgRef = await addDoc(collection(db, "organizations"), {
+        const orgData = {
             name,
             description: description || "",
             ownerId: currentUser.id,
             memberIds: [currentUser.id],
-            teamIds: [],
+            teamIds: [] as string[],
             createdAt: serverTimestamp(),
             inviteCode,
-        });
+        };
+        const newOrgRef = await addDoc(collection(db, "organizations"), orgData);
 
         const userDocRef = doc(db, "users", currentUser.id);
         await updateDoc(userDocRef, {
             organizationMemberships: arrayUnion(newOrgRef.id),
-            defaultOrganizationId: newOrgRef.id,
+            defaultOrganizationId: newOrgRef.id, // Set as default for the creator
         });
 
         const newOrgData: Organization = {
-            id: newOrgRef.id, name, ownerId: currentUser.id, memberIds: [currentUser.id], teamIds: [], createdAt: new Date().toISOString(), description, inviteCode
+            id: newOrgRef.id, 
+            name: orgData.name, 
+            ownerId: orgData.ownerId, 
+            memberIds: orgData.memberIds, 
+            teamIds: orgData.teamIds, 
+            createdAt: new Date().toISOString(), // Use current time as placeholder
+            description: orgData.description, 
+            inviteCode: orgData.inviteCode
         };
-
+        
         setCurrentUser(prevUser => prevUser ? ({
             ...prevUser,
             organizationMemberships: [...(prevUser.organizationMemberships || []), newOrgRef.id],
             defaultOrganizationId: newOrgRef.id,
         }) : null);
 
-        toast({ title: "Organization Created", description: `Organization "${name}" (Code: ${inviteCode}) created.` });
+        toast({ title: "Organization Created", description: `Organization "${name}" (Invite Code: ${inviteCode}) created and set as active.` });
         return newOrgData;
     } catch (error) {
         console.error("Error creating organization:", error);
@@ -656,14 +684,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     setLoading(true);
     try {
-        const newTeamRef = await addDoc(collection(db, "teams"), {
+        const teamData = {
             name,
             description: description || "",
             organizationId,
-            memberIds: [currentUser.id],
+            memberIds: [currentUser.id], // Creator is automatically a member and admin
             adminIds: [currentUser.id],
             createdAt: serverTimestamp(),
-        });
+        };
+        const newTeamRef = await addDoc(collection(db, "teams"), teamData);
 
         const orgDocRef = doc(db, "organizations", organizationId);
         await updateDoc(orgDocRef, {
@@ -676,12 +705,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         });
 
         const newTeamData: Team = {
-            id: newTeamRef.id, name, organizationId, memberIds: [currentUser.id], adminIds: [currentUser.id], createdAt: new Date().toISOString(), description
+            id: newTeamRef.id, 
+            name: teamData.name, 
+            organizationId: teamData.organizationId, 
+            memberIds: teamData.memberIds, 
+            adminIds: teamData.adminIds, 
+            createdAt: new Date().toISOString(), // Placeholder
+            description: teamData.description
         };
 
         setCurrentUser(prevUser => prevUser ? ({
             ...prevUser,
-            teamMemberships: [...(prevUser.teamMemberships || []), newTeamRef.id],
+            teamMemberships: [...new Set([...(prevUser.teamMemberships || []), newTeamRef.id])],
         }) : null);
 
         toast({ title: "Team Created", description: `Team "${name}" has been successfully created.` });
@@ -697,6 +732,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const joinTeam = async (teamId: string): Promise<boolean> => {
     if (!currentUser) return false;
+    setLoading(true);
     try {
         const batch = writeBatch(db);
         const teamDocRef = doc(db, "teams", teamId);
@@ -717,6 +753,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         console.error("Error joining team:", error);
         toast({ title: "Failed to Join", description: "Could not join the team.", variant: "destructive" });
         return false;
+    } finally {
+        setLoading(false);
     }
   };
 
@@ -737,7 +775,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 teamIds: data.teamIds || [],
                 createdAt: data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : new Date().toISOString(),
                 description: data.description,
-                inviteCode: data.inviteCode, // Ensure inviteCode is fetched
+                inviteCode: data.inviteCode, 
              } as Organization;
         });
     } catch (error) {
@@ -753,11 +791,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
         let teamsQuery;
         if (organizationId) {
-            teamsQuery = query(collection(db, "teams"), where("organizationId", "==", organizationId), where("memberIds", "array-contains", currentUser.id));
+            // Fetch teams for a specific organization the user is part of
+            teamsQuery = query(
+                collection(db, "teams"), 
+                where("organizationId", "==", organizationId), 
+                where("memberIds", "array-contains", currentUser.id)
+            );
         } else {
-            if (!currentUser.teamMemberships || currentUser.teamMemberships.length === 0) return [];
-            // Firestore 'in' query limit is 30. If user is in more teams, this needs batching.
-            teamsQuery = query(collection(db, "teams"), where("__name__", "in", currentUser.teamMemberships.slice(0,30) ));
+            // Fetch all teams the user is a member of (less common, might need pagination for many teams)
+            // This relies on teamMemberships array on user doc being up-to-date, or query all teams.
+            // For simplicity, we'll query based on general membership if no specific orgId.
+             teamsQuery = query(
+                collection(db, "teams"),
+                where("memberIds", "array-contains", currentUser.id)
+            );
         }
         const querySnapshot = await getDocs(teamsQuery);
         return querySnapshot.docs
@@ -772,8 +819,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                     createdAt: data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : new Date().toISOString(),
                     description: data.description,
                 } as Team;
-            })
-            .filter(team => team.memberIds.includes(currentUser.id)); // Ensure membership client-side if query was broad
+            });
 
     } catch (error) {
         console.error("Error fetching user teams:", error);
@@ -783,6 +829,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const setCurrentOrganization = async (organizationId: string | null): Promise<void> => {
     if (!currentUser) return;
+    setLoading(true);
     try {
         const userDocRef = doc(db, "users", currentUser.id);
         await updateDoc(userDocRef, { defaultOrganizationId: organizationId });
@@ -791,6 +838,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch (error) {
         console.error("Error setting current organization:", error);
         toast({ title: "Update Failed", description: "Could not set active organization.", variant: "destructive" });
+    } finally {
+        setLoading(false);
     }
   };
 
@@ -814,14 +863,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return null;
       }
 
-      const orgDoc = querySnapshot.docs[0]; // Assuming invite codes are unique
+      const orgDoc = querySnapshot.docs[0]; 
       const organization = { id: orgDoc.id, ...orgDoc.data() } as Organization;
 
       if (organization.memberIds.includes(currentUser.id)) {
         toast({ title: "Already a Member", description: `You are already a member of "${organization.name}".` });
-        // Optionally set as default if not already
         if(currentUser.defaultOrganizationId !== organization.id) {
-            await setCurrentOrganization(organization.id);
+            await setCurrentOrganization(organization.id); // Set as default if joined and not already default
         }
         return organization;
       }
@@ -833,7 +881,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const userDocRef = doc(db, "users", currentUser.id);
       batch.update(userDocRef, {
           organizationMemberships: arrayUnion(organization.id),
-          defaultOrganizationId: organization.id // Automatically set as default upon joining
+          defaultOrganizationId: organization.id 
       });
 
       await batch.commit();
@@ -858,7 +906,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const getUsersForChat = async (): Promise<AppUser[]> => {
     if (!currentUser || isGuest) {
-        // toast({ title: "Login Required", description: "Please log in to use the chat feature.", variant: "destructive" });
         return [];
     }
 
@@ -866,21 +913,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let usersQuery;
 
     if (currentUser.defaultOrganizationId) {
-        // Fetch users who are part of the current user's default organization
         usersQuery = query(usersCollectionRef, where('organizationMemberships', 'array-contains', currentUser.defaultOrganizationId));
     } else {
-        // No default organization, perhaps fetch all users (consider implications for large user bases)
-        // For now, let's return a limited set or an empty array if no org context.
-        // This part might need refinement based on product decisions (e.g., allow global chat or require org for chat).
-        // toast({ title: "Organization Needed", description: "Select a default organization to chat with its members.", variant: "default" });
-        usersQuery = query(usersCollectionRef, orderBy('displayName'), limit(50)); // Example: limit to 50 users if no org
+        // If no default org, return empty or based on other criteria (e.g., direct contacts - not implemented)
+        // For now, we'll say chat is primarily org-based.
+        return []; 
     }
 
     try {
         const querySnapshot = await getDocs(usersQuery);
         const users: AppUser[] = [];
         querySnapshot.forEach(docSnap => {
-            if (docSnap.id !== currentUser.id) { // Exclude current user from the list
+            if (docSnap.id !== currentUser.id) { 
                 const data = docSnap.data();
                 users.push({
                     id: docSnap.id,
