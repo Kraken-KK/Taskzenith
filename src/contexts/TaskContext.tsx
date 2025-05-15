@@ -28,8 +28,8 @@ const sanitizeAndAssignColumns = (columns: Column[] = []): Column[] => {
         status: columnId, // Crucial: ensure task status matches its column
         priority: task.priority || 'medium',
         createdAt: task.createdAt || formatISO(new Date()),
-        description: task.description || undefined,
-        deadline: task.deadline || undefined,
+        description: task.description || null, // Changed from undefined to null
+        deadline: task.deadline || null, // Changed from undefined to null
         dependencies: Array.isArray(task.dependencies) ? task.dependencies : [],
         checklist: Array.isArray(task.checklist) ? task.checklist.map(ci => ({
           id: ci.id || generateId('cl-item-sanitized'),
@@ -488,7 +488,8 @@ export function TaskProvider({ children }: { children: ReactNode }) {
         ...taskData,
         status: finalTargetColumnId,
         dependencies: Array.isArray(taskData.dependencies) ? taskData.dependencies : [],
-        description: taskData.description || undefined,
+        description: taskData.description || null, // Ensure null for undefined
+        deadline: taskData.deadline || null, // Ensure null for undefined
         tags: Array.isArray(taskData.tags) ? taskData.tags : [],
         checklist: Array.isArray(taskData.checklist) ? taskData.checklist.map(ci => ({ id: ci.id || generateId('cl-item'), text: ci.text, completed: ci.completed })) : [],
         assignedTo: Array.isArray(taskData.assignedTo) ? taskData.assignedTo : [],
@@ -729,3 +730,4 @@ export function useTasks() {
   }
   return context;
 }
+
