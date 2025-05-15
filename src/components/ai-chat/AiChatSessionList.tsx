@@ -2,9 +2,9 @@
 // src/components/ai-chat/AiChatSessionList.tsx
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import type { AiChatSession } from '@/types';
-import { Button, buttonVariants } from '@/components/ui/button'; // Added buttonVariants
+import { Button, buttonVariants } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { PlusCircle, MessageSquare, Trash2, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -43,17 +43,18 @@ export function AiChatSessionList({
   isLoadingSessions,
 }: AiChatSessionListProps) {
   const { toast } = useToast();
-  const [sessionToDelete, setSessionToDelete] = useState<AiChatSession | null>(null);
+  const [sessionToDeleteId, setSessionToDeleteId] = useState<string | null>(null);
 
   const handleDelete = async () => {
-    if (sessionToDelete && currentUserId) {
+    if (sessionToDeleteId && currentUserId) {
+      const sessionBeingDeleted = sessions.find(s => s.id === sessionToDeleteId);
       try {
-        await onDeleteSession(sessionToDelete.id);
-        toast({ title: "Chat Deleted", description: `Chat "${sessionToDelete.name}" has been deleted.` });
+        await onDeleteSession(sessionToDeleteId);
+        toast({ title: "Chat Deleted", description: `Chat "${sessionBeingDeleted?.name || 'Session'}" has been deleted.` });
       } catch (error) {
         toast({ title: "Error", description: "Could not delete chat session.", variant: "destructive" });
       } finally {
-        setSessionToDelete(null);
+        setSessionToDeleteId(null);
       }
     }
   };
@@ -91,63 +92,63 @@ export function AiChatSessionList({
         <ScrollArea className="flex-1">
           <nav className="p-2 space-y-1">
             {sessions.map((session) => (
-              <div key={session.id} className="group relative">
-                <button
-                  onClick={() => onSelectSession(session.id, session.name)}
-                  className={cn(
-                    'w-full flex flex-col items-start gap-0.5 p-2.5 rounded-lg text-left transition-colors duration-150 ease-in-out',
-                    activeSessionId === session.id
-                      ? 'bg-primary/15 text-primary shadow-sm'
-                      : 'hover:bg-muted/60 dark:hover:bg-neutral-700/60',
-                    !activeSessionId || activeSessionId !== session.id ? 'text-foreground' : ''
-                  )}
-                >
-                  <h3 className="text-sm font-medium truncate w-full">{session.name}</h3>
-                  <p className={cn(
-                      "text-xs truncate w-full",
-                      activeSessionId === session.id ? "text-primary/80" : "text-muted-foreground"
-                  )}>
-                      Updated {formatTimestamp(session.lastUpdatedAt)}
-                  </p>
-                </button>
-                <AlertDialogTrigger asChild>
-                   <Button
-                    variant="ghost"
-                    size="icon"
-                    className="absolute top-1/2 right-1.5 -translate-y-1/2 h-7 w-7 text-muted-foreground opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
-                    onClick={(e) => { 
-                        e.stopPropagation(); // Prevent session selection
-                        setSessionToDelete(session);
-                    }}
-                    title="Delete chat"
+              <AlertDialog key={session.id} open={sessionToDeleteId === session.id} onOpenChange={(open) => !open && setSessionToDeleteId(null)}>
+                <div className="group relative">
+                  <button
+                    onClick={() => onSelectSession(session.id, session.name)}
+                    className={cn(
+                      'w-full flex flex-col items-start gap-0.5 p-2.5 rounded-lg text-left transition-colors duration-150 ease-in-out',
+                      activeSessionId === session.id
+                        ? 'bg-primary/15 text-primary shadow-sm'
+                        : 'hover:bg-muted/60 dark:hover:bg-neutral-700/60',
+                      !activeSessionId || activeSessionId !== session.id ? 'text-foreground' : ''
+                    )}
                   >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </AlertDialogTrigger>
-              </div>
+                    <h3 className="text-sm font-medium truncate w-full">{session.name}</h3>
+                    <p className={cn(
+                        "text-xs truncate w-full",
+                        activeSessionId === session.id ? "text-primary/80" : "text-muted-foreground"
+                    )}>
+                        Updated {formatTimestamp(session.lastUpdatedAt)}
+                    </p>
+                  </button>
+                  <AlertDialogTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="absolute top-1/2 right-1.5 -translate-y-1/2 h-7 w-7 text-muted-foreground opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
+                      onClick={(e) => { 
+                          e.stopPropagation(); 
+                          setSessionToDeleteId(session.id);
+                      }}
+                      title="Delete chat"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </AlertDialogTrigger>
+                </div>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                  <AlertDialogTitle>Delete Chat &quot;{session.name}&quot;?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                      This action cannot be undone. This will permanently delete this chat session.
+                  </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                  <AlertDialogCancel onClick={() => setSessionToDeleteId(null)}>Cancel</AlertDialogCancel>
+                  <AlertDialogAction
+                      onClick={handleDelete}
+                      className={buttonVariants({ variant: "destructive" })}
+                  >
+                      Delete
+                  </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
             ))}
           </nav>
         </ScrollArea>
       )}
-        <AlertDialog open={!!sessionToDelete} onOpenChange={(open) => !open && setSessionToDelete(null)}>
-            <AlertDialogContent>
-                <AlertDialogHeader>
-                <AlertDialogTitle>Delete Chat &quot;{sessionToDelete?.name}&quot;?</AlertDialogTitle>
-                <AlertDialogDescription>
-                    This action cannot be undone. This will permanently delete this chat session.
-                </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                <AlertDialogCancel onClick={() => setSessionToDelete(null)}>Cancel</AlertDialogCancel>
-                <AlertDialogAction
-                    onClick={handleDelete}
-                    className={buttonVariants({ variant: "destructive" })}
-                >
-                    Delete
-                </AlertDialogAction>
-                </AlertDialogFooter>
-            </AlertDialogContent>
-        </AlertDialog>
     </div>
   );
 }
