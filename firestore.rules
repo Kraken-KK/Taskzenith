@@ -1,0 +1,155 @@
+
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper function to check organization membership
+    function isOrgMember(orgId) {
+      return exists(/databases/$(database)/documents/organizations/$(orgId)) &&
+             get(/databases/$(database)/documents/organizations/$(orgId)).data.memberIds.hasAny([request.auth.uid]);
+    }
+
+    // Helper function to check if user is an admin of a team
+    function isTeamAdmin(teamId) {
+      return exists(/databases/$(database)/documents/teams/$(teamId)) &&
+             request.auth.uid in get(/databases/$(database)/documents/teams/$(teamId)).data.adminIds;
+    }
+
+    // Helper function to check if user is a member of a team
+    function isTeamMember(teamId) {
+      return exists(/databases/$(database)/documents/teams/$(teamId)) &&
+             request.auth.uid in get(/databases/$(database)/documents/teams/$(teamId)).data.memberIds;
+    }
+
+    // Users collection
+    // Users can only read and write their own document and subcollections.
+    match /users/{userId} {
+      allow read, write: if request.auth.uid == userId;
+
+      // AI Chat Sessions subcollection
+      match /aiChatSessions/{sessionId} {
+        allow read, write: if request.auth.uid == userId;
+      }
+      // Potentially other user-specific subcollections here
+    }
+
+    // Organizations collection
+    match /organizations/{orgId} {
+      allow read: if request.auth.uid != null && request.auth.uid in resource.data.memberIds;
+      
+      allow create: if request.auth.uid != null &&
+                       request.resource.data.ownerId == request.auth.uid &&
+                       request.resource.data.memberIds[0] == request.auth.uid &&
+                       request.resource.data.memberIds.size() == 1 && // Ensure only owner is member initially
+                       request.resource.data.inviteCode is string && // Ensure inviteCode is present
+                       request.resource.data.inviteCode.size() == 5; // Ensure inviteCode has correct length
+
+      // Allow owner to update general info (name, description)
+      // Allow owner to update teamIds (when a team is created/deleted under this org by an admin)
+      // Allow any authenticated user to update memberIds IF they provide the correct inviteCode (for joining)
+      allow update: if request.auth.uid != null && (
+                      ( // Owner updates basic fields or teamIds
+                        request.auth.uid == resource.data.ownerId &&
+                        (
+                          (request.resource.data.keys().hasOnly(['name', 'description', 'lastUpdatedAt'])) || // Example: only name/desc
+                          (request.resource.data.teamIds != resource.data.teamIds) // Allow owner to modify teamIds
+                        )
+                      ) ||
+                      ( // User joining via invite code
+                        !resource.data.memberIds.hasAny([request.auth.uid]) && // User is not already a member
+                        request.resource.data.memberIds.hasAll(resource.data.memberIds) && // Only adding new members
+                        request.resource.data.memberIds.hasAny([request.auth.uid]) && // The requesting user is being added
+                        request.resource.data.memberIds.size() == resource.data.memberIds.size() + 1 && // Only one member is being added
+                        request.resource.data.inviteCodeUsed == resource.data.inviteCode // Correct invite code provided
+                        // Ensure other critical fields are not changed during join
+                        && request.resource.data.name == resource.data.name
+                        && request.resource.data.ownerId == resource.data.ownerId
+                        && request.resource.data.teamIds == resource.data.teamIds
+                        && request.resource.data.inviteCode == resource.data.inviteCode
+                      )
+                    );
+      // No delete for organizations for now, or restrict to owner/admin role if needed.
+      allow delete: if false; // Or: request.auth.uid == resource.data.ownerId;
+    }
+
+    // Teams collection
+    match /teams/{teamId} {
+      allow read: if request.auth.uid != null && 
+                     isOrgMember(resource.data.organizationId) && 
+                     request.auth.uid in resource.data.memberIds;
+
+      allow create: if request.auth.uid != null &&
+                       isOrgMember(request.resource.data.organizationId) &&
+                       request.resource.data.adminIds[0] == request.auth.uid &&
+                       request.resource.data.memberIds[0] == request.auth.uid &&
+                       request.resource.data.memberIds.size() == 1; // Creator is first member and admin
+
+      // Allow team admins to update team details (name, description, members, admins)
+      // Also allow users to add themselves to memberIds (joining a team - validated by app logic)
+      allow update: if request.auth.uid != null && isOrgMember(resource.data.organizationId) && (
+                      ( // Admin updates
+                        request.auth.uid in resource.data.adminIds
+                      ) ||
+                      ( // User joining the team (being added to memberIds)
+                        !resource.data.memberIds.hasAny([request.auth.uid]) && // User is not already a member
+                        request.resource.data.memberIds.hasAll(resource.data.memberIds) && // Only adding new members
+                        request.resource.data.memberIds.hasAny([request.auth.uid]) && // The requesting user is being added
+                        request.resource.data.memberIds.size() == resource.data.memberIds.size() + 1 &&
+                        // Ensure other critical fields are not changed by user joining
+                        request.resource.data.name == resource.data.name &&
+                        request.resource.data.adminIds == resource.data.adminIds &&
+                        request.resource.data.organizationId == resource.data.organizationId
+                      )
+                    );
+      
+      // Allow team admins to delete the team
+      allow delete: if request.auth.uid != null && 
+                       isOrgMember(resource.data.organizationId) && 
+                       request.auth.uid in resource.data.adminIds;
+    }
+
+    // ChatRooms collection
+    match /chatRooms/{roomId} {
+      allow read, write: if request.auth.uid != null && request.auth.uid in resource.data.memberIds;
+      allow create: if request.auth.uid != null && 
+                       request.resource.data.memberIds.hasAny([request.auth.uid]) &&
+                       request.resource.data.memberIds.size() >= 2; // Must have at least two members to create
+
+      // Messages subcollection
+      match /messages/{messageId} {
+        allow read: if request.auth.uid != null && 
+                       get(/databases/$(database)/documents/chatRooms/$(roomId)).data.memberIds.hasAny([request.auth.uid]);
+        
+        allow create: if request.auth.uid != null && 
+                         request.resource.data.senderId == request.auth.uid &&
+                         get(/databases/$(database)/documents/chatRooms/$(roomId)).data.memberIds.hasAny([request.auth.uid]);
+        
+        // Allow members of the chat room to update messages (e.g., for poll voting, reactions - future)
+        // For poll voting, ensure only poll data changes and senderId/timestamp remain the same
+        allow update: if request.auth.uid != null &&
+                         get(/databases/$(database)/documents/chatRooms/$(roomId)).data.memberIds.hasAny([request.auth.uid]) &&
+                         (
+                           // Allow updating poll if other fields are unchanged
+                           (request.resource.data.poll != resource.data.poll &&
+                            request.resource.data.text == resource.data.text &&
+                            request.resource.data.senderId == resource.data.senderId &&
+                            request.resource.data.createdAt == resource.data.createdAt
+                           ) 
+                           // Potentially add other conditions for message edits/reactions later
+                         );
+
+        // Generally, don't allow deleting messages, or restrict to sender/admin
+        allow delete: if false; 
+                      // Example: if request.auth.uid == resource.data.senderId; (allow sender to delete)
+      }
+    }
+    // Shared boards collection (Future - example, not fully defined here)
+    // match /sharedBoards/{boardId} {
+    //   allow read: if isOrgMember(resource.data.organizationId) && (resource.data.teamId == null || isTeamMember(resource.data.teamId));
+    //   allow write: if isOrgMember(resource.data.organizationId) && (resource.data.teamId == null || isTeamMember(resource.data.teamId)); // More granular write needed
+    // }
+  }
+}
+
+    
