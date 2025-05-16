@@ -9,7 +9,7 @@ import { useToast } from "@/hooks/use-toast";
 import { formatISO } from 'date-fns';
 import { useAuth } from './AuthContext'; 
 import { db } from '@/lib/firebase';
-import { doc, getDoc, updateDoc, setDoc, collection, query, where, onSnapshot, writeBatch, serverTimestamp, arrayUnion, arrayRemove, Unsubscribe, deleteDoc as deleteFirestoreDoc } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, setDoc, collection, query, where, onSnapshot, writeBatch, serverTimestamp, arrayUnion, arrayRemove, Unsubscribe, deleteDoc as deleteFirestoreDoc, Timestamp } from 'firebase/firestore';
 
 // Helper to generate unique IDs
 const generateId = (prefix: string = 'id') => `${prefix}-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
@@ -27,8 +27,8 @@ const sanitizeAndAssignColumns = (columns: Column[] = []): Column[] => {
         status: columnId, 
         priority: task.priority || 'medium',
         createdAt: task.createdAt || formatISO(new Date()),
-        description: task.description || null,
-        deadline: task.deadline || null,
+        description: task.description || null, // Ensure null for undefined
+        deadline: task.deadline || null,     // Ensure null for undefined
         dependencies: Array.isArray(task.dependencies) ? task.dependencies : [],
         checklist: Array.isArray(task.checklist) ? task.checklist.map(ci => ({
           id: ci.id || generateId('cl-item-sanitized'),
@@ -54,7 +54,7 @@ const sanitizeBoard = (boardData: Partial<Board>, boardIdOverride?: string): Boa
     organizationId: boardData.organizationId === undefined ? null : boardData.organizationId,
     teamId: boardData.teamId === undefined ? null : boardData.teamId,
     isPublic: boardData.isPublic === undefined ? false : boardData.isPublic,
-    ownerId: boardData.ownerId, // Will be undefined for personal boards from user doc initially
+    ownerId: boardData.ownerId || null, // Ensure null if not present, important for shared boards
   };
 };
 
@@ -192,7 +192,6 @@ export function TaskProvider({ children }: { children: ReactNode }) {
           setActiveBoardIdState(userData.activeBoardId || (boardsData.personal.length > 0 ? boardsData.personal[0].id : null ));
 
         } else {
-          // User document might not exist yet if AuthContext is still creating it
           console.warn("TaskContext: User document not found for personal data listener. AuthContext should handle creation.");
           setBoardsData(prev => ({ ...prev, personal: [] }));
           setBoardGroups([]);
@@ -224,7 +223,6 @@ export function TaskProvider({ children }: { children: ReactNode }) {
       setSharedBoardsUnsubscribes(newSharedUnsubs);
       setIsLoadingData(false);
     } else {
-      // No current user and not a guest
       setBoardsData({ personal: [], shared: [] });
       setBoardGroups([]);
       setActiveBoardIdState(null);
@@ -235,7 +233,7 @@ export function TaskProvider({ children }: { children: ReactNode }) {
       personalDataUnsubscribe?.();
       sharedBoardsUnsubscribes.forEach(unsub => unsub());
     };
-  }, [currentUser, isGuest, authLoading, toast]); // Removed boardsData from deps to avoid loop
+  }, [currentUser, isGuest, authLoading]);
 
 
   // Save boardGroups and activeBoardId to user doc (these are user-specific settings)
@@ -245,13 +243,12 @@ export function TaskProvider({ children }: { children: ReactNode }) {
     const userDocRef = doc(db, 'users', currentUser.id);
     const dataToUpdate: { boardGroups?: BoardGroup[], activeBoardId?: string | null } = {};
     
-    if (boardGroups.length > 0 || (activeBoardId !== undefined && activeBoardId !== null)) { // only update if there's something to save
+    if (boardGroups.length > 0 || (activeBoardId !== undefined && activeBoardId !== null)) {
       dataToUpdate.boardGroups = boardGroups.map(g => sanitizeBoardGroup(g));
       dataToUpdate.activeBoardId = activeBoardId;
 
       updateDoc(userDocRef, dataToUpdate).catch(error => {
         console.error("TaskContext: Error saving boardGroups/activeBoardId to Firestore:", error);
-        // Non-critical toast for these settings as board data itself is saved directly or via listeners
       });
     }
   }, [boardGroups, activeBoardId, currentUser, isGuest, isLoadingData, authLoading]);
@@ -259,7 +256,6 @@ export function TaskProvider({ children }: { children: ReactNode }) {
 
   const combinedBoards = useMemo(() => {
     const allBoards = [...boardsData.personal, ...boardsData.shared];
-    // Deduplicate if somehow a board ID exists in both (shouldn't happen with correct logic)
     const uniqueBoardIds = new Set<string>();
     return allBoards.filter(board => {
         if (uniqueBoardIds.has(board.id)) return false;
@@ -291,78 +287,73 @@ export function TaskProvider({ children }: { children: ReactNode }) {
         { id: generateId('col'), title: 'Done', tasks: [], wipLimit: 0 },
       ],
       groupId: groupId === undefined ? null : groupId,
-      organizationId: organizationId === undefined ? (organizationId === null ? null : currentUser?.defaultOrganizationId ?? null) : organizationId,
+      organizationId: organizationId,
       teamId: teamId === undefined ? null : teamId,
-      createdAt: formatISO(new Date()),
+      createdAt: formatISO(new Date()), // For guest/personal before Firestore save
     };
 
-    if (baseBoardData.organizationId && currentUser) { // Shared board
+    if (baseBoardData.organizationId && currentUser && !isGuest) { 
       baseBoardData.ownerId = currentUser.id;
-      const newBoard = sanitizeBoard(baseBoardData);
+      const newBoard = sanitizeBoard(baseBoardData); 
       try {
         await setDoc(doc(db, 'boards', newBoard.id), {
             ...newBoard, 
-            createdAt: serverTimestamp() // Use server timestamp for shared boards
+            createdAt: serverTimestamp() as Timestamp 
         });
-        // setActiveBoardId will trigger a save of activeBoardId to user doc
-        // The board itself appears via onSnapshot listener
         setActiveBoardIdState(newBoard.id); 
         toast({ title: "Shared Board Created", description: `Board "${name}" created in organization.`});
         return newBoard;
-      } catch (error) {
-        console.error("Error creating shared board:", error);
-        toast({ title: "Creation Failed", description: "Could not create shared board.", variant: "destructive"});
+      } catch (error: any) { 
+        console.error("Error creating shared board:", error.code, error.message, error);
+        toast({ title: "Creation Failed", description: `Shared board: ${error.message}`, variant: "destructive"});
         return undefined;
       }
-    } else { // Personal board (or guest board)
-      const newBoard = sanitizeBoard(baseBoardData);
+    } else { 
+      const newBoard = sanitizeBoard(baseBoardData); 
       if (isGuest) {
-        setBoardsData(prev => ({...prev, personal: [...prev.personal, newBoard]}));
-        localStorage.setItem('kanbanBoards-guestSession', JSON.stringify([...boardsData.personal, newBoard]));
+        const updatedGuestBoards = [...boardsData.personal, newBoard];
+        setBoardsData(prev => ({...prev, personal: updatedGuestBoards}));
+        localStorage.setItem('kanbanBoards-guestSession', JSON.stringify(updatedGuestBoards));
         if (newBoard.groupId) {
-            // Guest mode group update (simplified)
             const updatedGroups = boardGroups.map(g => g.id === newBoard.groupId ? {...g, boardIds: [...g.boardIds, newBoard.id]} : g);
             setBoardGroups(updatedGroups);
             localStorage.setItem('boardGroups-guestSession', JSON.stringify(updatedGroups));
         }
-      } else if (currentUser) {
+        setActiveBoardIdState(newBoard.id);
+        toast({ title: "Guest Board Created", description: `Board "${name}" created.`});
+        return newBoard;
+      } else if (currentUser) { 
         const userDocRef = doc(db, 'users', currentUser.id);
         try {
+          const boardForUserDoc = { ...newBoard, createdAt: formatISO(new Date()) };
           await updateDoc(userDocRef, {
-            personalBoards: arrayUnion(newBoard) // Add to personalBoards array
+            personalBoards: arrayUnion(boardForUserDoc) 
           });
-          // activeBoardId state change will trigger its own save if needed
-          // The board itself appears via onSnapshot listener
-        } catch (error) {
-          console.error("Error adding personal board to user doc:", error);
-          toast({ title: "Creation Failed", description: "Could not save personal board.", variant: "destructive"});
+          setActiveBoardIdState(boardForUserDoc.id);
+          toast({ title: "Personal Board Created", description: `Board "${name}" created.`});
+          return boardForUserDoc;
+        } catch (error: any) { 
+          console.error("Error adding personal board to user doc:", error.code, error.message, error);
+          toast({ title: "Creation Failed", description: `Personal board: ${error.message}`, variant: "destructive"});
           return undefined;
         }
       }
-      setActiveBoardIdState(newBoard.id);
-      toast({ title: "Personal Board Created", description: `Board "${name}" created.`});
-      return newBoard;
     }
+    return undefined; 
   };
   
-  // setActiveBoardId should persist the choice for logged-in users
   const setActiveBoardId = useCallback((boardId: string | null) => {
     setActiveBoardIdState(boardId);
     if (currentUser && !isGuest) {
       const userDocRef = doc(db, 'users', currentUser.id);
       updateDoc(userDocRef, { activeBoardId: boardId }).catch(error => {
         console.error("TaskContext: Error saving activeBoardId to Firestore:", error);
-        // Non-critical, as it's a user preference
       });
     } else if (isGuest) {
       if (boardId) localStorage.setItem('activeKanbanBoardId-guestSession', boardId);
       else localStorage.removeItem('activeKanbanBoardId-guestSession');
     }
   }, [currentUser, isGuest]);
-
-
-  // --- Board Modification Functions ---
-  // These need to determine if the board is personal or shared and act accordingly
 
   const getBoardAndRef = async (boardId: string): Promise<{ board: Board | undefined, boardRef?: any, isShared: boolean, userDocRef?: any, currentPersonalBoards?: Board[] }> => {
     const boardFromState = combinedBoards.find(b => b.id === boardId);
@@ -377,7 +368,7 @@ export function TaskProvider({ children }: { children: ReactNode }) {
       const currentPersonalBoards = (userDocSnap.data()?.personalBoards as Board[] || []);
       return { board: boardFromState, userDocRef, currentPersonalBoards, isShared: false };
     } else if (isGuest) {
-      return { board: boardFromState, isShared: false }; // Guest boards handled by direct state update + localStorage
+      return { board: boardFromState, isShared: false }; 
     }
     return { board: undefined, isShared: false };
   };
@@ -388,15 +379,13 @@ export function TaskProvider({ children }: { children: ReactNode }) {
     const { board, boardRef, isShared, userDocRef, currentPersonalBoards } = await getBoardAndRef(boardId);
     if (!board) return;
 
-    const boardName = board.name; // Get name before potential deletion from state
+    const boardName = board.name; 
 
     if (isShared && boardRef) {
       await deleteFirestoreDoc(boardRef);
-      // State updates via onSnapshot
-    } else if (userDocRef && currentPersonalBoards) { // Personal board of logged-in user
+    } else if (userDocRef && currentPersonalBoards) { 
       const updatedPersonalBoards = currentPersonalBoards.filter(b => b.id !== boardId);
       await updateDoc(userDocRef, { personalBoards: updatedPersonalBoards });
-      // State updates via onSnapshot
     } else if (isGuest) {
       const updatedGuestBoards = boardsData.personal.filter(b => b.id !== boardId);
       setBoardsData(prev => ({ ...prev, personal: updatedGuestBoards }));
@@ -406,13 +395,12 @@ export function TaskProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    if (board.groupId) { // This part updates boardGroups in user doc or localStorage
+    if (board.groupId) { 
         setBoardGroups(prevGroups => prevGroups.map(g => 
             g.id === board.groupId 
                 ? sanitizeBoardGroup({ ...g, boardIds: g.boardIds.filter(id => id !== boardId) }) 
                 : g
         ));
-        // boardGroups are saved in their own useEffect
     }
     toast({ title: "Board Deleted", description: `Board "${boardName}" has been successfully deleted.`});
   };
@@ -456,8 +444,6 @@ export function TaskProvider({ children }: { children: ReactNode }) {
   };
 
   const updateBoardGroupId = async (boardId: string, newGroupId: string | null) => {
-    // This primarily affects the board's own `groupId` field.
-    // The `boardGroups` array (which lists `boardIds`) is managed by `addBoardToGroup` and `removeBoardFromGroup`.
     const { board, boardRef, isShared, userDocRef, currentPersonalBoards } = await getBoardAndRef(boardId);
     if (!board) return;
 
@@ -471,16 +457,11 @@ export function TaskProvider({ children }: { children: ReactNode }) {
         setBoardsData(prev => ({...prev, personal: updatedGuestBoards}));
         localStorage.setItem('kanbanBoards-guestSession', JSON.stringify(updatedGuestBoards));
     }
-    // Toast is usually better handled by addBoardToGroup/removeBoardFromGroup
   };
 
   const updateBoardCollaboration = async (boardId: string, orgId: string | null, teamId: string | null) => {
-    // This is complex. If a personal board becomes shared, it needs to move collection.
-    // If a shared board changes org, it's also a move.
-    // For now, assume this only updates orgId/teamId on existing shared boards.
-    // True "moving" a personal board to shared is not implemented here yet.
     const { board, boardRef, isShared } = await getBoardAndRef(boardId);
-    if (!board || !isShared || !boardRef) { // Only for existing shared boards
+    if (!board || !isShared || !boardRef) { 
         toast({ title: "Error", description: "Can only update collaboration for existing shared boards.", variant: "destructive"});
         return;
     }
@@ -489,7 +470,6 @@ export function TaskProvider({ children }: { children: ReactNode }) {
     toast({ title: "Board Collaboration Updated", description: `Collaboration settings for "${boardName}" updated.` });
   };
 
-  // Board Group functions mostly update userDoc or localStorage, then rely on boardGroups useEffect for persistence.
   const addBoardGroup = (name: string): BoardGroup | undefined => {
     if (!currentUser && !isGuest) {
         toast({ title: "Action Denied", variant: "destructive"});
@@ -497,7 +477,6 @@ export function TaskProvider({ children }: { children: ReactNode }) {
     }
     const newGroup = sanitizeBoardGroup({ name, boardIds: [] });
     setBoardGroups(prev => [...prev, newGroup]);
-    // useEffect for boardGroups will save
     toast({ title: "Board Group Created", description: `Group "${name}" created.`});
     return newGroup;
   };
@@ -508,8 +487,6 @@ export function TaskProvider({ children }: { children: ReactNode }) {
     if (!groupToDelete) return;
 
     setBoardGroups(prev => prev.filter(g => g.id !== groupId));
-    // Remove this groupId from any boards that were in it
-    // This needs to update both personal and shared boards' groupId field
     combinedBoards.forEach(async b => {
         if (b.groupId === groupId) {
             const { boardRef, isShared, userDocRef, currentPersonalBoards } = await getBoardAndRef(b.id);
@@ -521,6 +498,7 @@ export function TaskProvider({ children }: { children: ReactNode }) {
             } else if (isGuest) {
                 const updatedGuestBoards = boardsData.personal.map(gb => gb.id === b.id ? sanitizeBoard({...gb, groupId: null}) : gb);
                 setBoardsData(prev => ({...prev, personal: updatedGuestBoards}));
+                // For guests, boardGroups save is handled by the useEffect for boardGroups itself
             }
         }
     });
@@ -538,7 +516,6 @@ export function TaskProvider({ children }: { children: ReactNode }) {
     const boardToMove = combinedBoards.find(b => b.id === boardId);
     if (!boardToMove) return;
 
-    // 1. Update board's groupId
     const { boardRef: targetBoardRef, isShared: targetIsShared, userDocRef: targetUserDocRef, currentPersonalBoards: targetCurrentPersonal } = await getBoardAndRef(boardId);
     if (targetIsShared && targetBoardRef) {
         await updateDoc(targetBoardRef, { groupId: targetGroupId });
@@ -550,14 +527,11 @@ export function TaskProvider({ children }: { children: ReactNode }) {
         setBoardsData(prev => ({...prev, personal: updatedGuestBoards}));
     }
     
-    // 2. Update boardGroups state (will be persisted by its own useEffect)
     setBoardGroups(prevGroups => prevGroups.map(g => {
         let newBoardIds = [...g.boardIds];
-        // Remove from old group if it was in one
         if (g.id !== targetGroupId && newBoardIds.includes(boardId)) {
             newBoardIds = newBoardIds.filter(id => id !== boardId);
         }
-        // Add to new group
         if (g.id === targetGroupId && !newBoardIds.includes(boardId)) {
             newBoardIds.push(boardId);
         }
@@ -573,7 +547,6 @@ export function TaskProvider({ children }: { children: ReactNode }) {
     
     const oldGroupId = boardToRemove.groupId;
 
-    // 1. Update board's groupId to null
     const { boardRef, isShared, userDocRef, currentPersonalBoards } = await getBoardAndRef(boardId);
     if (isShared && boardRef) {
         await updateDoc(boardRef, { groupId: null });
@@ -585,7 +558,6 @@ export function TaskProvider({ children }: { children: ReactNode }) {
         setBoardsData(prev => ({...prev, personal: updatedGuestBoards}));
     }
 
-    // 2. Update boardGroups state
     setBoardGroups(prevGroups => prevGroups.map(g => 
         g.id === oldGroupId ? sanitizeBoardGroup({ ...g, boardIds: g.boardIds.filter(id => id !== boardId) }) : g
     ));
@@ -593,28 +565,27 @@ export function TaskProvider({ children }: { children: ReactNode }) {
   };
 
 
-  // Task and Column operations: These need to modify the correct board document (personal or shared)
   const modifyBoardData = async (
     boardId: string, 
-    updateFunction: (boardData: Board) => Board | false // Return false if no update needed
+    updateFunction: (boardData: Board) => Board | false 
   ) => {
-    if (!currentUser && !isGuest && !getActiveBoard()?.organizationId) return; // Allow guest or if board is shared
+    if (!currentUser && !isGuest && !getActiveBoard()?.organizationId) return; 
 
     const { board, boardRef, isShared, userDocRef, currentPersonalBoards } = await getBoardAndRef(boardId);
     if (!board) return;
 
     const updatedBoardData = updateFunction(board);
-    if (updatedBoardData === false) return; // No change made by updateFunction
+    if (updatedBoardData === false) return; 
 
     const sanitizedUpdatedBoard = sanitizeBoard(updatedBoardData);
 
     if (isShared && boardRef) {
-      await updateDoc(boardRef, sanitizedUpdatedBoard); // Save whole board object
+      await updateDoc(boardRef, sanitizedUpdatedBoard); 
     } else if (userDocRef && currentPersonalBoards) {
-      const updatedPersonalBoards = currentPersonalBoards.map(b => b.id === boardId ? sanitizedUpdatedBoard : b);
+      const updatedPersonalBoards = currentPersonalBoards.map(b => b.id === boardId ? sanitizedUpdatedBoard : sanitizeBoard(b));
       await updateDoc(userDocRef, { personalBoards: updatedPersonalBoards });
     } else if (isGuest) {
-        const updatedGuestBoards = boardsData.personal.map(b => b.id === boardId ? sanitizedUpdatedBoard : b);
+        const updatedGuestBoards = boardsData.personal.map(b => b.id === boardId ? sanitizedUpdatedBoard : sanitizeBoard(b));
         setBoardsData(prev => ({...prev, personal: updatedGuestBoards}));
         localStorage.setItem('kanbanBoards-guestSession', JSON.stringify(updatedGuestBoards));
     }
@@ -648,10 +619,6 @@ export function TaskProvider({ children }: { children: ReactNode }) {
   };
   
   const moveTask = (taskId: string, sourceColumnId: Column['id'], targetColumnId: Column['id'], isBetaModeActive: boolean): { task: Task | null, automated: boolean } => {
-    // This one is tricky as it modifies state directly for return value, then calls modifyBoardData
-    // For simplicity, this one will directly update state and then trigger a save via modifyBoardData
-    // which might re-apply the same state. This isn't ideal but simpler for now.
-    // A better way would be for modifyBoardData to also return the result of updateFunction.
     let movedTaskResult: Task | null = null;
     let automationAppliedResult = false;
     const board = getActiveBoard();
@@ -701,7 +668,6 @@ export function TaskProvider({ children }: { children: ReactNode }) {
         }
         return col;
       });
-      // Toast handled by page.tsx via board object
       return { ...currentBoard, columns: updatedBoardColumns };
     });
   };
@@ -855,7 +821,7 @@ export function TaskProvider({ children }: { children: ReactNode }) {
     });
   };
 
-  if (isLoadingData && !isGuest) { // Show loading only for non-guests as guest mode loads sync
+  if (isLoadingData && !isGuest) { 
      return (
       <TaskContext.Provider value={{ 
         boards: [], activeBoardId: null, setActiveBoardId: () => {}, getActiveBoard: () => undefined, 
