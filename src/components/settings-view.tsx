@@ -20,9 +20,10 @@ import { Moon, Sun, Laptop, Zap, MessageCircle, LogOut, UserCircle, Database, Ch
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'; 
 import { cn } from '@/lib/utils';
 import type { Organization, Team } from '@/types'; 
-import { CreateOrganizationDialog } from './create-organization-dialog'; 
-import { CreateTeamDialog } from './create-team-dialog'; 
-import { JoinOrganizationDialog } from './join-organization-dialog'; // Import JoinOrganizationDialog
+// Dialog imports removed as functionality is moved to OrganizationManagementView
+// import { CreateOrganizationDialog } from './create-organization-dialog'; 
+// import { CreateTeamDialog } from './create-team-dialog'; 
+// import { JoinOrganizationDialog } from './join-organization-dialog'; 
 import { ScrollArea } from './ui/scroll-area';
 import { useToast } from '@/hooks/use-toast';
 
@@ -39,63 +40,13 @@ export function SettingsView() {
   const { isBetaModeEnabled, setIsBetaModeEnabled, interactionStyle, setInteractionStyle } = useSettings();
   const { 
     currentUser, logout, loading: authLoading, currentProvider, isGuest, 
-    getUserOrganizations, getUserTeams, createOrganization, createTeam, setCurrentOrganization 
+    // Org/Team management functions will be used by OrganizationManagementView
   } = useAuth(); 
   const { toast } = useToast();
 
-  const [userOrganizations, setUserOrganizations] = useState<Organization[]>([]);
-  const [userTeams, setUserTeams] = useState<Team[]>([]);
-  const [isCreateOrgDialogOpen, setIsCreateOrgDialogOpen] = useState(false);
-  const [isCreateTeamDialogOpen, setIsCreateTeamDialogOpen] = useState(false);
-  const [isJoinOrgDialogOpen, setIsJoinOrgDialogOpen] = useState(false); // State for join dialog
-  const [selectedOrgForTeamCreation, setSelectedOrgForTeamCreation] = useState<string | null>(null);
-  const [copiedCode, setCopiedCode] = useState<string | null>(null);
-
-  const fetchUserOrgsAndTeams = async () => {
-    if (currentUser && !isGuest) {
-      const orgs = await getUserOrganizations();
-      setUserOrganizations(orgs);
-      if (currentUser.defaultOrganizationId) {
-        const teams = await getUserTeams(currentUser.defaultOrganizationId);
-        setUserTeams(teams);
-      } else if (orgs.length > 0) {
-        const teams = await getUserTeams(orgs[0].id); 
-        setUserTeams(teams);
-      } else {
-        setUserTeams([]);
-      }
-    }
-  };
-
-  useEffect(() => {
-    if (currentUser && !isGuest) {
-      fetchUserOrgsAndTeams();
-    }
-  }, [currentUser, isGuest, currentUser?.defaultOrganizationId]); // Re-fetch if defaultOrganizationId changes
-
-  const handleSetCurrentOrg = async (orgId: string | null) => {
-    await setCurrentOrganization(orgId);
-    // fetchUserOrgsAndTeams will be triggered by useEffect due to currentUser.defaultOrganizationId change
-  };
-
-  const handleOpenCreateTeamDialog = (orgId: string) => {
-    setSelectedOrgForTeamCreation(orgId);
-    setIsCreateTeamDialogOpen(true);
-  };
-  
-  const handleCopyInviteCode = (code: string) => {
-    navigator.clipboard.writeText(code).then(() => {
-      setCopiedCode(code);
-      toast({ title: "Copied!", description: "Invite code copied to clipboard." });
-      setTimeout(() => setCopiedCode(null), 2000);
-    }).catch(err => {
-      console.error('Failed to copy invite code: ', err);
-      toast({ title: "Copy Failed", description: "Could not copy invite code.", variant: "destructive" });
-    });
-  };
-
 
   const getUserInitial = () => {
+    if (isGuest) return "G";
     if (currentUser?.displayName) {
       return currentUser.displayName.charAt(0).toUpperCase();
     }
@@ -121,14 +72,14 @@ export function SettingsView() {
 
   return (
     <ScrollArea className="h-[calc(100vh-8rem)]"> 
-    <div className="max-w-2xl mx-auto space-y-8 p-1">
+    <div className="max-w-2xl mx-auto space-y-8 p-1 sm:p-4">
       <Card className="shadow-xl interactive-card-hover">
         <CardHeader>
           <CardTitle>Application Settings</CardTitle>
           <CardDescription>Manage your preferences and application settings.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
-          {currentUser && (
+          {(currentUser && !isGuest) && (
             <div className="p-4 border rounded-lg shadow-sm hover:shadow-md transition-shadow duration-200">
               <Label className="text-base font-medium flex items-center gap-2 mb-3">
                   <UserCircle className="h-5 w-5 text-primary" /> Account Information
@@ -157,6 +108,24 @@ export function SettingsView() {
               </Button>
             </div>
           )}
+
+          {isGuest && (
+             <div className="p-4 border rounded-lg shadow-sm hover:shadow-md transition-shadow duration-200">
+              <Label className="text-base font-medium flex items-center gap-2 mb-3">
+                  <UserCircle className="h-5 w-5 text-primary" /> Guest Session
+              </Label>
+              <p className="text-sm text-muted-foreground">You are currently exploring as a guest. Your data is stored locally and will be lost if you clear your browser data or switch browsers.</p>
+               <Button 
+                  variant="default" 
+                  onClick={() => router.push('/login')} // Assuming exitGuestMode in AuthContext handles redirect
+                  className="w-full mt-4"
+              >
+                <LogIn className="mr-2 h-4 w-4" />
+                Login or Sign Up
+              </Button>
+            </div>
+          )}
+
 
           <div className="flex items-center justify-between p-4 border rounded-lg shadow-sm hover:shadow-md transition-shadow duration-200">
             <div className="space-y-0.5">
@@ -244,106 +213,8 @@ export function SettingsView() {
         </CardFooter>
       </Card>
       
-      {currentUser && !isGuest && (
-        <Card className="shadow-xl interactive-card-hover">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2"><Briefcase className="h-5 w-5 text-primary"/> My Organizations</CardTitle>
-            <CardDescription>Manage your organizations, create a new one, or join using an invite code.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {userOrganizations.length === 0 ? (
-              <p className="text-sm text-muted-foreground">You are not part of any organization yet.</p>
-            ) : (
-              <ul className="space-y-3">
-                {userOrganizations.map(org => (
-                  <li key={org.id} className="p-3 border rounded-md shadow-sm space-y-2">
-                    <div className="flex justify-between items-center">
-                        <span className="font-medium">{org.name} {org.id === currentUser.defaultOrganizationId && <span className="text-xs text-primary ml-1">(Active)</span>}</span>
-                        <Button variant={org.id === currentUser.defaultOrganizationId ? "secondary" : "outline" } size="sm" onClick={() => handleSetCurrentOrg(org.id)} disabled={org.id === currentUser.defaultOrganizationId}>
-                        {org.id === currentUser.defaultOrganizationId ? "Active Org" : "Set Active"}
-                        </Button>
-                    </div>
-                    {org.ownerId === currentUser.id && org.inviteCode && (
-                        <div className="flex items-center gap-2 text-xs text-muted-foreground border-t pt-2 mt-2">
-                            <span>Invite Code: <strong className="text-foreground tracking-wider">{org.inviteCode}</strong></span>
-                            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleCopyInviteCode(org.inviteCode)}>
-                                {copiedCode === org.inviteCode ? <Check className="h-4 w-4 text-green-500" /> : <ClipboardCopy className="h-4 w-4" />}
-                            </Button>
-                        </div>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            )}
-            <div className="flex flex-col sm:flex-row gap-2 mt-4">
-                 <Button onClick={() => setIsCreateOrgDialogOpen(true)} className="flex-1">
-                    <PlusCircle className="mr-2 h-4 w-4" /> Create New Organization
-                  </Button>
-                  <Button onClick={() => setIsJoinOrgDialogOpen(true)} variant="outline" className="flex-1">
-                     <LogIn className="mr-2 h-4 w-4" /> Join Organization
-                  </Button>
-            </div>
-              {currentUser.defaultOrganizationId && (
-                 <Button variant="outline" onClick={() => handleSetCurrentOrg(null)} className="w-full mt-2">
-                    Clear Default Organization
-                 </Button>
-              )}
-          </CardContent>
-        </Card>
-      )}
-
-      {currentUser && !isGuest && currentUser.defaultOrganizationId && (
-        <Card className="shadow-xl interactive-card-hover">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2"><Users className="h-5 w-5 text-primary"/> Teams in {userOrganizations.find(o=>o.id === currentUser.defaultOrganizationId)?.name || 'Default Org'}</CardTitle>
-            <CardDescription>Manage teams within your active organization.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {userTeams.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No teams in this organization yet.</p>
-            ) : (
-              <ul className="space-y-2">
-                {userTeams.map(team => (
-                  <li key={team.id} className="flex justify-between items-center p-3 border rounded-md shadow-sm">
-                    <span>{team.name}</span>
-                    <Button variant="outline" size="sm" onClick={() => alert(`Manage team ${team.name} - Not implemented`)}>Manage</Button>
-                  </li>
-                ))}
-              </ul>
-            )}
-            <Button 
-                onClick={() => currentUser.defaultOrganizationId && handleOpenCreateTeamDialog(currentUser.defaultOrganizationId)} 
-                className="w-full mt-2"
-                disabled={!currentUser.defaultOrganizationId}
-            >
-              <PlusCircle className="mr-2 h-4 w-4" /> Create New Team
-            </Button>
-          </CardContent>
-        </Card>
-      )}
+      {/* Organization and Team management sections are removed from here and will be part of OrganizationManagementView */}
       
-      <CreateOrganizationDialog 
-        open={isCreateOrgDialogOpen} 
-        onOpenChange={(isOpen) => {
-            setIsCreateOrgDialogOpen(isOpen);
-            if(!isOpen) fetchUserOrgsAndTeams(); 
-        }} 
-      />
-      <CreateTeamDialog 
-        open={isCreateTeamDialogOpen} 
-        onOpenChange={(isOpen) => {
-            setIsCreateTeamDialogOpen(isOpen);
-            if(!isOpen) fetchUserOrgsAndTeams(); 
-        }} 
-        organizationId={selectedOrgForTeamCreation} 
-      />
-       <JoinOrganizationDialog
-        open={isJoinOrgDialogOpen}
-        onOpenChange={(isOpen) => {
-          setIsJoinOrgDialogOpen(isOpen);
-        }}
-        onOrgJoined={fetchUserOrgsAndTeams} // Refresh org list after successfully joining
-      />
     </div>
     </ScrollArea>
   );

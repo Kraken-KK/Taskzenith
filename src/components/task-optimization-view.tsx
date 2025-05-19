@@ -23,11 +23,11 @@ export function TaskOptimizationView() {
         </CardHeader>
         <CardContent>
           <Tabs defaultValue="prioritize" className="w-full">
-            <TabsList className="grid w-full grid-cols-2 mb-6 rounded-lg shadow-inner">
-              <TabsTrigger value="prioritize" className="py-2.5 sm:py-3 text-xs sm:text-sm data-[state=active]:shadow-md">
+            <TabsList className="grid w-full grid-cols-2 mb-6 rounded-lg shadow-inner bg-muted/50">
+              <TabsTrigger value="prioritize" className="py-2.5 sm:py-3 text-xs sm:text-sm data-[state=active]:shadow-md data-[state=active]:bg-background">
                 <ListChecks className="mr-1.5 sm:mr-2 h-4 w-4 sm:h-5 sm:w-5" /> AI Task Prioritization
               </TabsTrigger>
-              <TabsTrigger value="suggestions" className="py-2.5 sm:py-3 text-xs sm:text-sm data-[state=active]:shadow-md">
+              <TabsTrigger value="suggestions" className="py-2.5 sm:py-3 text-xs sm:text-sm data-[state=active]:shadow-md data-[state=active]:bg-background">
                 <Sparkles className="mr-1.5 sm:mr-2 h-4 w-4 sm:h-5 sm:w-5" /> Smart Task Suggestions
               </TabsTrigger>
             </TabsList>
@@ -43,3 +43,4 @@ export function TaskOptimizationView() {
     </div>
   );
 }
+

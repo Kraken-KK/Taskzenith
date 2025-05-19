@@ -19,7 +19,7 @@ import {
 import { doc, getDoc, setDoc, updateDoc, serverTimestamp, Timestamp, collection, addDoc, arrayUnion, arrayRemove, writeBatch, query, where, getDocs, orderBy, limit } from 'firebase/firestore'; // Firestore imports
 import { useToast } from '@/hooks/use-toast';
 import { useRouter } from 'next/navigation';
-import type { Board, Task, Column, BoardGroup, Organization, Team, ChatRoom } from '@/types';
+import type { Board, Task, Column, BoardGroup, Organization, Team, ChatRoom, AiChatSession } from '@/types';
 import { formatISO } from 'date-fns';
 import type { InteractionStyle } from './SettingsContext';
 import type { MessageHistoryItem } from '@/ai/schemas';
@@ -52,6 +52,7 @@ const assignTaskStatusToDefaultColumns = (columns: Column[]): Column[] => {
       priority: task.priority || 'medium',
       createdAt: task.createdAt || formatISO(new Date()),
       checklist: Array.isArray(task.checklist) ? task.checklist.map(ci => ({ ...ci, id: ci.id || generateId('cl-item')})) : [],
+      subtasks: Array.isArray(task.subtasks) ? task.subtasks.map(st => ({ ...st, id: st.id || generateId('subtask')})) : [],
       dependencies: Array.isArray(task.dependencies) ? task.dependencies : [],
       tags: Array.isArray(task.tags) ? task.tags : [],
       assignedTo: Array.isArray(task.assignedTo) ? task.assignedTo : [],
@@ -60,19 +61,6 @@ const assignTaskStatusToDefaultColumns = (columns: Column[]): Column[] => {
     })) : [],
   }));
 };
-
-
-const getDefaultColumnsForNewUser = (): Column[] => [
-  {
-    id: generateId('col'),
-    title: 'To Do',
-    tasks: [
-      { id: generateId('task'), content: 'Welcome! Plan your day', status: '', priority: 'high', createdAt: formatISO(new Date()), dependencies:[], checklist:[], tags:[], assignedTo: [] },
-    ],
-  },
-  { id: generateId('col'), title: 'In Progress', tasks: [], wipLimit: 0 },
-  { id: generateId('col'), title: 'Done', tasks: [], wipLimit: 0 },
-];
 
 
 const getDefaultBoardForNewUser = (): Board => ({
@@ -85,18 +73,26 @@ const getDefaultBoardForNewUser = (): Board => ({
   organizationId: null,
   teamId: null,
   isPublic: false,
-  personalBoards: [], // Added for consistency, though this specific board is added to personalBoards later
+  ownerId: null, 
 });
+
+const getDefaultColumnsForNewUser = (): Column[] => [
+  {
+    id: generateId('col'),
+    title: 'To Do',
+    tasks: [
+      { id: generateId('task'), content: 'Welcome! Plan your day', status: '', priority: 'high', createdAt: formatISO(new Date()), dependencies:[], checklist:[], tags:[], assignedTo: [], subtasks: [] },
+    ],
+  },
+  { id: generateId('col'), title: 'In Progress', tasks: [], wipLimit: 0 },
+  { id: generateId('col'), title: 'Done', tasks: [], wipLimit: 0 },
+];
+
 
 const defaultUserSettings = {
   theme: 'system' as 'light' | 'dark' | 'system',
   isBetaModeEnabled: false,
   interactionStyle: 'friendly' as InteractionStyle,
-};
-
-const defaultAiChatHistory = {
-  messages: [] as MessageHistoryItem[],
-  lastUpdatedAt: serverTimestamp() as Timestamp,
 };
 
 
@@ -136,7 +132,7 @@ interface AuthContextType {
   joinOrganizationByInviteCode: (inviteCode: string) => Promise<Organization | null>;
   getUsersForChat: () => Promise<AppUser[]>;
   getOrganizationMembers: (organizationId: string) => Promise<AppUser[]>;
-  getTeamMembers: (teamId: string) => Promise<AppUser[]>; // New
+  getTeamMembers: (teamId: string) => Promise<AppUser[]>; 
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -194,7 +190,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     try {
       const userDocSnap = await getDoc(userDocRef);
-      const defaultBoard = getDefaultBoardForNewUser(); // This will be a personal board
+      const defaultBoard = getDefaultBoardForNewUser(); 
+      defaultBoard.ownerId = appUser.id; // Set ownerId for the default personal board
 
       if (!userDocSnap.exists()) {
         console.log(`Firestore Init: User document for ${appUser.id} does NOT exist. Attempting to CREATE new document.`);
@@ -205,10 +202,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           provider: appUser.provider,
           createdAt: serverTimestamp() as Timestamp,
           lastLogin: serverTimestamp() as Timestamp,
-          personalBoards: [defaultBoard], // Store personal boards in an array
+          personalBoards: [defaultBoard], 
           activeBoardId: defaultBoard.id,
           settings: defaultUserSettings,
-          aiChatHistory: {
+          aiChatHistory: { // For single, last AI chat session
             messages: [],
             lastUpdatedAt: serverTimestamp(),
           },
@@ -228,32 +225,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const updates: Record<string, any> = { lastLogin: serverTimestamp() as Timestamp };
         let needsUpdate = false;
 
-        // Ensure personalBoards field exists and is an array
-        if (!userData.personalBoards || !Array.isArray(userData.personalBoards)) {
-            updates.personalBoards = userData.boards && Array.isArray(userData.boards) && userData.boards.length > 0
-                ? userData.boards.map((b: Partial<Board>) => ({ ...getDefaultBoardForNewUser(), ...b, id: b.id || generateId('board-migrated') })) // Attempt migration
-                : [defaultBoard];
-            updates.activeBoardId = updates.personalBoards[0].id;
+        // Ensure personalBoards field exists and is an array, and boards have ownerId
+        if (!Array.isArray(userData.personalBoards)) {
+            updates.personalBoards = [defaultBoard]; // Initialize if completely missing
             needsUpdate = true;
-            console.log(`Firestore Init: User ${appUser.id} - personalBoards missing or not array. Initialized/Migrated.`);
+            console.log(`Firestore Init: User ${appUser.id} - personalBoards missing. Initialized.`);
         } else {
             updates.personalBoards = userData.personalBoards.map((board: Partial<Board>) => ({
-                ...getDefaultBoardForNewUser(), // Spread defaults first
-                ...board, // Then spread actual board data
+                ...getDefaultBoardForNewUser(), 
+                ...board, 
                 id: board.id || generateId('board-migrated'),
-                name: board.name || 'Untitled Board',
-                columns: assignTaskStatusToDefaultColumns(board.columns || []),
-                createdAt: board.createdAt || formatISO(new Date()),
-                theme: board.theme || {},
-                groupId: board.groupId === undefined ? null : board.groupId,
-                organizationId: board.organizationId === undefined ? null : board.organizationId, // Personal boards shouldn't have this
-                teamId: board.teamId === undefined ? null : board.teamId, // Personal boards shouldn't have this
-                isPublic: board.isPublic === undefined ? false : board.isPublic,
-              }));
-              if (JSON.stringify(updates.personalBoards) !== JSON.stringify(userData.personalBoards)) {
+                ownerId: board.ownerId || appUser.id // Ensure ownerId
+            }));
+            if (JSON.stringify(updates.personalBoards) !== JSON.stringify(userData.personalBoards)) {
                 needsUpdate = true;
-                console.log(`Firestore Init: User ${appUser.id} - updated personalBoards structure.`);
-             }
+                console.log(`Firestore Init: User ${appUser.id} - updated personalBoards structure/ownerId.`);
+            }
         }
 
         if ((!userData.activeBoardId && updates.personalBoards && updates.personalBoards.length > 0) ||
@@ -264,52 +251,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
 
 
-        if (!userData.settings) {
+        if (!userData.settings || typeof userData.settings !== 'object') {
           updates.settings = defaultUserSettings;
           needsUpdate = true;
-        }
-
-        let currentAiChatHistory = userData.aiChatHistory;
-        let aiHistoryNeedsUpdate = false;
-        if (!currentAiChatHistory || typeof currentAiChatHistory !== 'object' || !('messages' in currentAiChatHistory) || !('lastUpdatedAt' in currentAiChatHistory)) {
-          currentAiChatHistory = { messages: [], lastUpdatedAt: serverTimestamp() };
-          aiHistoryNeedsUpdate = true;
         } else {
-          if (!Array.isArray(currentAiChatHistory.messages)) {
-            currentAiChatHistory.messages = [];
-            aiHistoryNeedsUpdate = true;
-          }
-          if (typeof currentAiChatHistory.lastUpdatedAt === 'undefined' || !(currentAiChatHistory.lastUpdatedAt instanceof Timestamp || currentAiChatHistory.lastUpdatedAt?.toDate)) {
-            currentAiChatHistory.lastUpdatedAt = serverTimestamp();
-            aiHistoryNeedsUpdate = true;
-          }
+            updates.settings = { ...defaultUserSettings, ...userData.settings };
+            if(JSON.stringify(updates.settings) !== JSON.stringify(userData.settings)){
+                needsUpdate = true;
+            }
         }
-        if (aiHistoryNeedsUpdate) {
-          updates.aiChatHistory = currentAiChatHistory;
-          needsUpdate = true;
-          console.log(`Firestore Init: User ${appUser.id} - aiChatHistory field was missing or malformed. Repaired/Initialized.`);
+        
+        if (!userData.aiChatHistory || typeof userData.aiChatHistory !== 'object' || !Array.isArray(userData.aiChatHistory.messages) || !(userData.aiChatHistory.lastUpdatedAt instanceof Timestamp)) {
+            updates.aiChatHistory = { messages: [], lastUpdatedAt: serverTimestamp() };
+            needsUpdate = true;
+            console.log(`Firestore Init: User ${appUser.id} - aiChatHistory malformed. Repaired.`);
         }
 
 
-        if (!userData.boardGroups || !Array.isArray(userData.boardGroups)) {
-          updates.boardGroups = [];
-          needsUpdate = true;
+        if (!Array.isArray(userData.boardGroups)) {
+          updates.boardGroups = []; needsUpdate = true;
         }
-        if (!userData.organizationMemberships || !Array.isArray(userData.organizationMemberships)) {
-          updates.organizationMemberships = [];
-          needsUpdate = true;
+        if (!Array.isArray(userData.organizationMemberships)) {
+          updates.organizationMemberships = []; needsUpdate = true;
         }
-        if (!userData.teamMemberships || !Array.isArray(userData.teamMemberships)) {
-          updates.teamMemberships = [];
-          needsUpdate = true;
+        if (!Array.isArray(userData.teamMemberships)) {
+          updates.teamMemberships = []; needsUpdate = true;
         }
-        if (userData.defaultOrganizationId === undefined) { // Check specifically for undefined
-          updates.defaultOrganizationId = null;
-          needsUpdate = true;
+        if (userData.defaultOrganizationId === undefined) { 
+          updates.defaultOrganizationId = null; needsUpdate = true;
         }
-        if (!userData.chatRoomIds || !Array.isArray(userData.chatRoomIds)) {
-          updates.chatRoomIds = [];
-          needsUpdate = true;
+        if (!Array.isArray(userData.chatRoomIds)) {
+          updates.chatRoomIds = []; needsUpdate = true;
         }
 
         if (appUser.email && userData.email !== appUser.email) {
@@ -318,7 +290,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (appUser.displayName && userData.displayName !== appUser.displayName) {
             updates.displayName = appUser.displayName; needsUpdate = true;
         }
-        if (appUser.photoURL !== undefined && userData.photoURL !== appUser.photoURL) { // Check for undefined before comparing
+        if (appUser.photoURL !== undefined && userData.photoURL !== appUser.photoURL) { 
             updates.photoURL = appUser.photoURL || null; needsUpdate = true;
         }
         if(userData.provider !== appUser.provider) {
@@ -805,14 +777,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
         let teamsQuery;
         if (organizationId) {
+            // Fetch all teams for the given organization
             teamsQuery = query(
                 collection(db, "teams"),
-                where("organizationId", "==", organizationId)
+                where("organizationId", "==", organizationId),
+                orderBy("name", "asc")
             );
         } else {
+            // Fetch all teams the user is a member of (across all orgs)
              teamsQuery = query(
                 collection(db, "teams"),
-                where("memberIds", "array-contains", currentUser.id)
+                where("memberIds", "array-contains", currentUser.id),
+                orderBy("name", "asc")
             );
         }
         const querySnapshot = await getDocs(teamsQuery);
@@ -823,7 +799,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                     id: docSnap.id,
                     name: data.name,
                     organizationId: data.organizationId,
-                    memberIds: data.memberIds,
+                    memberIds: data.memberIds || [],
                     adminIds: data.adminIds || [],
                     createdAt: data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : new Date().toISOString(),
                     description: data.description,
@@ -893,9 +869,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if(currentUser.defaultOrganizationId !== organization.id) {
             const userDocRefForDefaultUpdate = doc(db, "users", currentUser.id);
             batch.update(userDocRefForDefaultUpdate, { defaultOrganizationId: organization.id });
-            setCurrentUser(prevUser => prevUser ? ({...prevUser, defaultOrganizationId: organization.id}) : null);
         }
-        await batch.commit();
+        await batch.commit(); // Commit even if just setting default
+        // Update local state for defaultOrganizationId immediately if it changed
+        if(currentUser.defaultOrganizationId !== organization.id) {
+           setCurrentUser(prevUser => prevUser ? ({...prevUser, defaultOrganizationId: organization.id}) : null);
+        }
         setLoading(false);
         return organization;
       }
@@ -941,6 +920,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (currentUser.defaultOrganizationId) {
         usersQuery = query(usersCollectionRef, where('organizationMemberships', 'array-contains', currentUser.defaultOrganizationId));
     } else {
+        // If no default org, maybe fetch users who are not in any org? Or just return empty.
+        // For now, let's assume chat is only within an org context.
         return [];
     }
 
@@ -948,14 +929,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const querySnapshot = await getDocs(usersQuery);
         const users: AppUser[] = [];
         querySnapshot.forEach(docSnap => {
-            if (docSnap.id !== currentUser.id) {
+            if (docSnap.id !== currentUser.id) { // Exclude current user from the list
                 const data = docSnap.data();
                 users.push({
                     id: docSnap.id,
                     email: data.email,
                     displayName: data.displayName,
                     photoURL: data.photoURL,
-                    provider: data.provider,
+                    provider: data.provider, // Assuming provider is stored
                     organizationMemberships: data.organizationMemberships || [],
                     teamMemberships: data.teamMemberships || [],
                     defaultOrganizationId: data.defaultOrganizationId || null,
@@ -982,16 +963,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             return [];
         }
 
-        const orgData = orgDocSnap.data() as Organization;
+        const orgData = orgDocSnap.data() as Organization; // Type assertion
         const memberIds = orgData.memberIds || [];
 
         if (memberIds.length === 0) return [];
+        
+        // Firestore 'in' query limit is 30. If more, batching is needed.
+        // For simplicity, assuming memberIds.length <= 30.
+        // If it can be larger, you'll need to implement batching for getDocs.
+        const userDocsQuery = query(collection(db, "users"), where("__name__", "in", memberIds.slice(0,30)));
+        const memberDocsSnap = await getDocs(userDocsQuery);
 
-        const memberPromises = memberIds.map(id => getDoc(doc(db, "users", id)));
-        const memberDocsSnap = await Promise.all(memberPromises);
-
-        const members: AppUser[] = memberDocsSnap
-            .filter(docSnap => docSnap.exists())
+        const members: AppUser[] = memberDocsSnap.docs
             .map(docSnap => {
                 const data = docSnap.data();
                 return {
@@ -1000,7 +983,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                     displayName: data.displayName,
                     photoURL: data.photoURL,
                     provider: data.provider,
-                } as AppUser;
+                } as AppUser; // Type assertion, ensure your user docs have these fields
             });
         return members;
 
@@ -1021,16 +1004,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             console.warn(`getTeamMembers: Team ${teamId} not found.`);
             return [];
         }
-        const teamData = teamDocSnap.data() as Team;
+        const teamData = teamDocSnap.data() as Team; // Type assertion
         const memberIds = teamData.memberIds || [];
 
         if (memberIds.length === 0) return [];
 
-        const memberPromises = memberIds.map(id => getDoc(doc(db, "users", id)));
-        const memberDocsSnap = await Promise.all(memberPromises);
+        const userDocsQuery = query(collection(db, "users"), where("__name__", "in", memberIds.slice(0,30)));
+        const memberDocsSnap = await getDocs(userDocsQuery);
 
-        const members: AppUser[] = memberDocsSnap
-            .filter(docSnap => docSnap.exists())
+
+        const members: AppUser[] = memberDocsSnap.docs
             .map(docSnap => {
                 const data = docSnap.data();
                 return {
@@ -1039,7 +1022,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                     displayName: data.displayName,
                     photoURL: data.photoURL,
                     provider: data.provider,
-                } as AppUser;
+                } as AppUser; 
             });
         return members;
 
@@ -1086,3 +1069,4 @@ export function useAuth() {
   }
   return context;
 }
+
