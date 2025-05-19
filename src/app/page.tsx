@@ -20,11 +20,11 @@ import { KanbanBoard } from "@/components/kanban-board";
 import { AiChat } from "@/components/ai-chat";
 import { SettingsView } from '@/components/settings-view';
 import { TaskOptimizationView } from '@/components/task-optimization-view';
-import { OrganizationManagementView } from '@/components/organization-management-view'; // New View
+import { OrganizationManagementView } from '@/components/organization-management-view';
 import { ChatLayout } from '@/components/chat/ChatLayout';
 import { Bot, CheckSquare, ListTodo, Settings, Star, Menu, FolderKanban, PlusCircle, Edit3, Trash2, Palette, LogOut, Database, Zap, User, Chrome, FolderPlus, FolderSymlink, Folders, Users, Building, Briefcase, MessageSquare, LogIn, MoreVertical, UserPlus, Sparkles } from "lucide-react";
 import { useSidebar } from '@/components/ui/sidebar';
-import { Button, buttonVariants } from '@/components/ui/button'; // Added buttonVariants import
+import { Button, buttonVariants } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useTasks } from '@/contexts/TaskContext';
 import type { Board, BoardGroup, Organization, Team } from '@/types';
@@ -33,9 +33,10 @@ import { RenameBoardDialog } from '@/components/rename-board-dialog';
 import { BoardThemeCustomizer } from '@/components/board-theme-customizer';
 import { CreateBoardGroupDialog } from '@/components/create-board-group-dialog';
 import { RenameBoardGroupDialog } from '@/components/rename-board-group-dialog';
-import { CreateOrganizationDialog } from '@/components/create-organization-dialog';
-import { CreateTeamDialog } from '@/components/create-team-dialog';
-import { JoinOrganizationDialog } from '@/components/join-organization-dialog';
+// Dialog imports for org/team creation are removed as they are now inline in OrganizationManagementView
+// import { CreateOrganizationDialog } from '@/components/create-organization-dialog';
+// import { CreateTeamDialog } from '@/components/create-team-dialog';
+// import { JoinOrganizationDialog } from '@/components/join-organization-dialog';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -90,21 +91,20 @@ export default function Home() {
   const [isRenameBoardDialogOpen, setIsRenameBoardDialogOpen] = useState(false);
   const [boardToRename, setBoardToRename] = useState<Board | undefined>(undefined);
   const [isThemeCustomizerOpen, setIsThemeCustomizerOpen] = useState(false);
-  const [boardToCustomize, setBoardToCustomize] = useState<Board | undefined>(undefined);
+  // boardToCustomize is not used, getActiveBoard() is passed directly
   const [isCreateGroupDialogOpen, setIsCreateGroupDialogOpen] = useState(false);
   const [isRenameGroupDialogOpen, setIsRenameGroupDialogOpen] = useState(false);
   const [groupToRename, setGroupToRename] = useState<BoardGroup | undefined>(undefined);
   const [targetGroupIdForNewBoard, setTargetGroupIdForNewBoard] = useState<string | null | undefined>(undefined);
 
-  // These dialog states might be moved to the new OrganizationManagementView or SettingsView later
-  const [isCreateOrgDialogOpen, setIsCreateOrgDialogOpen] = useState(false);
-  const [isJoinOrgDialogOpen, setIsJoinOrgDialogOpen] = useState(false);
-  const [isCreateTeamDialogOpen, setIsCreateTeamDialogOpen] = useState(false);
+  // States for old dialogs are removed as forms are now inline in OrganizationManagementView
+  // const [isCreateOrgDialogOpen, setIsCreateOrgDialogOpen] = useState(false);
+  // const [isJoinOrgDialogOpen, setIsJoinOrgDialogOpen] = useState(false);
+  // const [isCreateTeamDialogOpen, setIsCreateTeamDialogOpen] = useState(false);
 
-  const [userOrganizations, setUserOrganizations] = useState<Organization[]>([]);
-  const [userTeams, setUserTeams] = useState<Team[]>([]); 
-  const [selectedOrgForTeamCreation, setSelectedOrgForTeamCreation] = useState<string | null>(null);
-
+  const [userOrganizations, setUserOrganizations] = useState<Organization[]>([]); // This state might become redundant if OrganizationManagementView handles its own fetching
+  const [userTeams, setUserTeams] = useState<Team[]>([]); // This state might become redundant
+  // const [selectedOrgForTeamCreation, setSelectedOrgForTeamCreation] = useState<string | null>(null); // Removed
 
   useEffect(() => {
     if (!authLoading && !currentUser && !isGuest) {
@@ -118,7 +118,7 @@ export default function Home() {
     }
   }, [activeBoardId, boards, setActiveBoardId, currentUser, isGuest]);
 
-  const fetchUserOrgs = useCallback(async () => {
+  const fetchUserOrgs = useCallback(async () => { // This might be moved or become part of OrganizationManagementView
     if (currentUser && !isGuest) {
         const orgs = await getUserOrganizations();
         setUserOrganizations(orgs);
@@ -128,21 +128,21 @@ export default function Home() {
   }, [currentUser, isGuest, getUserOrganizations]);
 
 
-  useEffect(() => {
+  useEffect(() => { // This effect is likely less critical now
     fetchUserOrgs();
   }, [fetchUserOrgs]);
 
-  useEffect(() => {
+  useEffect(() => { // This effect is likely less critical now, OrganizationManagementView will handle active org teams
     const fetchTeamsForActiveOrg = async () => {
         if (currentUser && !isGuest && currentUser.defaultOrganizationId) {
             const teams = await getUserTeams(currentUser.defaultOrganizationId);
-            setUserTeams(teams);
+            setUserTeams(teams); // This might be used to display team indicators on boards, or can be removed if not.
         } else {
             setUserTeams([]);
         }
     };
     fetchTeamsForActiveOrg();
-  }, [currentUser, getUserTeams]);
+  }, [currentUser, getUserTeams, currentUser?.defaultOrganizationId]);
 
 
   if (authLoading || (!currentUser && !isGuest && activeView !== 'chat')) {
@@ -183,7 +183,7 @@ export default function Home() {
   };
 
   const handleCustomizeTheme = (board: Board) => {
-    setBoardToCustomize(board);
+    // setBoardToCustomize(board); // Not used, passing activeBoard directly
     setIsThemeCustomizerOpen(true);
   }
 
@@ -250,7 +250,7 @@ export default function Home() {
     const success = await joinTeam(teamId);
     if (success) {
       toast({ title: "Joined Team", description: `You have successfully joined "${teamName}".`});
-      // Refresh teams list
+      // Refresh teams list, now likely handled by OrganizationManagementView
       const updatedTeams = await getUserTeams(currentUser.defaultOrganizationId);
       setUserTeams(updatedTeams);
     }
@@ -283,13 +283,13 @@ export default function Home() {
           <SidebarMenu>
             <SidebarMenuItem>
                 <SidebarMenuButton
-                  tooltip="Organizations"
+                  tooltip="Organization Management"
                   isActive={activeView === 'organization-management'}
                   onClick={() => handleViewChange('organization-management')}
                   className="w-full hover:bg-sidebar-accent/80 dark:hover:bg-sidebar-accent/50"
                   disabled={authLoading || (!currentUser && !isGuest)}
                 >
-                  <Building /> Organizations
+                  <Building /> Organization
                 </SidebarMenuButton>
               </SidebarMenuItem>
             <SidebarSeparator />
@@ -649,33 +649,8 @@ export default function Home() {
       <BoardThemeCustomizer board={getActiveBoard()} open={isThemeCustomizerOpen} onOpenChange={setIsThemeCustomizerOpen} />
       <CreateBoardGroupDialog open={isCreateGroupDialogOpen} onOpenChange={setIsCreateGroupDialogOpen} />
       <RenameBoardGroupDialog group={groupToRename} open={isRenameGroupDialogOpen} onOpenChange={setIsRenameGroupDialogOpen} />
-      {/* Dialogs for org/team creation will be moved or replaced by inline forms in OrganizationManagementView */}
-      <CreateOrganizationDialog
-        open={isCreateOrgDialogOpen}
-        onOpenChange={(isOpen) => {
-            setIsCreateOrgDialogOpen(isOpen);
-            if(isOpen === false) fetchUserOrgs();
-        }}
-      />
-      <JoinOrganizationDialog
-        open={isJoinOrgDialogOpen}
-        onOpenChange={(isOpen) => {
-            setIsJoinOrgDialogOpen(isOpen);
-            if(isOpen === false) fetchUserOrgs();
-        }}
-        onOrgJoined={fetchUserOrgs}
-      />
-      <CreateTeamDialog
-        open={isCreateTeamDialogOpen}
-        onOpenChange={async (isOpen) => {
-            setIsCreateTeamDialogOpen(isOpen);
-            if(isOpen === false && currentUser && currentUser.defaultOrganizationId) {
-                const teams = await getUserTeams(currentUser.defaultOrganizationId);
-                setUserTeams(teams);
-            }
-        }}
-        organizationId={selectedOrgForTeamCreation}
-      />
+      {/* Dialogs for org/team creation are removed as their functionality is now inline in OrganizationManagementView */}
     </div>
   );
 }
+
