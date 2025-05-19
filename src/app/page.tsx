@@ -19,10 +19,9 @@ import {
 import { KanbanBoard } from "@/components/kanban-board";
 import { AiChat } from "@/components/ai-chat";
 import { SettingsView } from '@/components/settings-view';
-import { PrioritizeTasksView } from '@/components/prioritize-tasks-view';
-import { SmartTaskCreationView } from '@/components/smart-task-creation-view';
+import { TaskOptimizationView } from '@/components/task-optimization-view'; // New View
 import { ChatLayout } from '@/components/chat/ChatLayout';
-import { Bot, CheckSquare, ListTodo, Settings, Star, Menu, FolderKanban, PlusCircle, Edit3, Trash2, Palette, LogOut, Database, Zap, User, Chrome, FolderPlus, FolderSymlink, Folders, Users, Building, Briefcase, MessageSquare, LogIn, MoreVertical, UserPlus } from "lucide-react";
+import { Bot, CheckSquare, ListTodo, Settings, Star, Menu, FolderKanban, PlusCircle, Edit3, Trash2, Palette, LogOut, Database, Zap, User, Chrome, FolderPlus, FolderSymlink, Folders, Users, Building, Briefcase, MessageSquare, LogIn, MoreVertical, UserPlus, Sparkles } from "lucide-react"; // Added Sparkles
 import { useSidebar } from '@/components/ui/sidebar';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -61,12 +60,13 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { Badge } from "@/components/ui/badge";
 import { useToast } from '@/hooks/use-toast';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { useIsMobile } from '@/hooks/use-mobile';
 
 
-type ActiveView = 'board' | 'ai-assistant' | 'prioritize' | 'smart-create' | 'settings' | 'organizations' | 'teams' | 'chat';
+type ActiveView = 'board' | 'ai-assistant' | 'task-optimization' | 'settings' | 'organizations' | 'teams' | 'chat';
 
 export default function Home() {
   const {
@@ -119,11 +119,9 @@ export default function Home() {
         const orgs = await getUserOrganizations();
         setUserOrganizations(orgs);
         if (currentUser.defaultOrganizationId) {
-            // Fetch all teams for the default organization
             const teamsInDefaultOrg = await getUserTeams(currentUser.defaultOrganizationId);
             setUserTeams(teamsInDefaultOrg);
         } else if (orgs.length > 0) {
-             // If no default, maybe fetch for the first org? Or none?
              const teamsInFirstOrg = await getUserTeams(orgs[0].id); 
              setUserTeams(teamsInFirstOrg);
         } else {
@@ -158,8 +156,7 @@ export default function Home() {
     switch (activeView) {
       case 'board': return activeBoard ? activeBoard.name : 'Kanban Board';
       case 'ai-assistant': return 'AI Assistant (Jack)';
-      case 'prioritize': return 'AI Task Prioritization';
-      case 'smart-create': return 'Smart Task Creation';
+      case 'task-optimization': return 'Task Optimization';
       case 'settings': return 'Settings';
       case 'organizations': return 'My Organizations';
       case 'teams': return currentOrg ? `Teams in ${currentOrg.name}` : 'My Teams';
@@ -175,10 +172,10 @@ export default function Home() {
 
   const handleDeleteBoard = (boardId: string, boardName: string) => {
     deleteBoard(boardId);
-    toast({
+    setTimeout(() => toast({
         title: "Board Deleted",
         description: `Board "${boardName}" has been successfully deleted.`,
-    });
+    }), 0);
   };
 
   const handleCustomizeTheme = (board: Board) => {
@@ -193,16 +190,16 @@ export default function Home() {
 
   const handleDeleteGroup = (groupId: string, groupName: string) => {
     deleteBoardGroup(groupId);
-    toast({
+    setTimeout(() => toast({
         title: "Board Group Deleted",
         description: `Group "${groupName}" has been deleted. Its boards are now ungrouped.`,
-    });
+    }), 0);
   };
 
   const handleMoveBoardToGroup = (boardId: string, groupId: string | null) => {
     if (groupId === "new_group") {
         setIsCreateGroupDialogOpen(true);
-        toast({ title: "Create Group", description: "Please create a new group first, then move the board."});
+        setTimeout(() => toast({ title: "Create Group", description: "Please create a new group first, then move the board."}), 0);
     } else if (groupId === "remove_from_group") {
         removeBoardFromGroup(boardId);
     } else if (groupId) {
@@ -245,8 +242,6 @@ export default function Home() {
 
   const handleSetCurrentOrg = async (orgId: string | null) => {
     await setCurrentOrganization(orgId);
-    // Re-fetch teams after changing org context
-    // fetchUserOrgsAndTeams will be called by useEffect due to currentUser.defaultOrganizationId change
     if (isMobile) setSidebarOpen(false);
   };
 
@@ -261,10 +256,8 @@ export default function Home() {
     if (!currentUser) return;
     const success = await joinTeam(teamId);
     if (success) {
-      toast({ title: "Joined Team", description: `You have successfully joined "${teamName}".`});
-      fetchUserOrgsAndTeams(); // Re-fetch to update UI if needed
-    } else {
-      // Toast for failure is handled within joinTeam
+      setTimeout(() => toast({ title: "Joined Team", description: `You have successfully joined "${teamName}".`}), 0);
+      fetchUserOrgsAndTeams(); 
     }
   };
 
@@ -564,7 +557,7 @@ export default function Home() {
                   onClick={() => {
                     if (!activeBoardId && boards.length > 0) setActiveBoardId(boards[0].id);
                     else if (!activeBoardId && boards.length === 0) {
-                         toast({title: "No Board Selected", description: "Please create or select a board first.", variant: "destructive"});
+                         setTimeout(() => toast({title: "No Board Selected", description: "Please create or select a board first.", variant: "destructive"}),0);
                          return;
                     }
                     handleViewChange('board');
@@ -602,26 +595,14 @@ export default function Home() {
              </SidebarMenuItem>
              <SidebarMenuItem>
                <SidebarMenuButton
-                  tooltip="Prioritize Tasks"
-                  isActive={activeView === 'prioritize'}
-                  onClick={() => handleViewChange('prioritize')}
+                  tooltip="Task Optimization"
+                  isActive={activeView === 'task-optimization'}
+                  onClick={() => handleViewChange('task-optimization')}
                   className="hover:bg-sidebar-accent/80 dark:hover:bg-sidebar-accent/50"
                   disabled={authLoading && !currentUser && !isGuest}
                 >
-                  <Star />
-                  Prioritize Tasks
-                </SidebarMenuButton>
-             </SidebarMenuItem>
-             <SidebarMenuItem>
-               <SidebarMenuButton
-                  tooltip="Smart Task Creation"
-                  isActive={activeView === 'smart-create'}
-                  onClick={() => handleViewChange('smart-create')}
-                  className="hover:bg-sidebar-accent/80 dark:hover:bg-sidebar-accent/50"
-                  disabled={authLoading && !currentUser && !isGuest}
-                >
-                  <CheckSquare />
-                  Smart Task Creation
+                  <Sparkles />
+                  Task Optimization
                 </SidebarMenuButton>
              </SidebarMenuItem>
            </SidebarMenu>
@@ -688,7 +669,7 @@ export default function Home() {
         </SidebarFooter>
       </Sidebar>
       <SidebarInset className="flex flex-col transition-all duration-300 ease-in-out">
-        <header className="flex items-center justify-between p-4 border-b shadow-sm bg-card/50 backdrop-blur-sm sticky top-0 z-20"> {/* Increased z-index */}
+        <header className="flex items-center justify-between p-4 border-b shadow-sm bg-card/50 backdrop-blur-sm sticky top-0 z-20">
            <SidebarTrigger />
            <h1 className="text-xl font-semibold">{getHeaderText()}</h1>
            <div className={cn("w-7 h-7", isMobile && "md:hidden")}>
@@ -724,8 +705,7 @@ export default function Home() {
           )}
           {activeView === 'ai-assistant' && <AiChat />}
           {activeView === 'chat' && <ChatLayout />}
-          {activeView === 'prioritize' && <PrioritizeTasksView />}
-          {activeView === 'smart-create' && <SmartTaskCreationView />}
+          {activeView === 'task-optimization' && <TaskOptimizationView />}
           {activeView === 'settings' && <SettingsView />}
           {activeView === 'organizations' && !isGuest && currentUser &&(
             <div className="p-4">
