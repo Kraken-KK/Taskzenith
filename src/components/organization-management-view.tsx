@@ -6,7 +6,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth, type AppUser } from '@/contexts/AuthContext';
 import type { Organization, Team } from '@/types';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
-import { Button, buttonVariants } from '@/components/ui/button'; // Import buttonVariants
+import { Button, buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -22,16 +22,17 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 
 
 export function OrganizationManagementView() {
-  const { 
-    currentUser, 
-    getUserOrganizations, 
-    getUserTeams, 
+  const {
+    currentUser,
+    getUserOrganizations,
+    getUserTeams,
     setCurrentOrganization,
     createOrganization,
     joinOrganizationByInviteCode,
     createTeam,
     joinTeam,
     getOrganizationMembers,
+    getTeamMembers, // New function from AuthContext
   } = useAuth();
   const { toast } = useToast();
 
@@ -39,29 +40,28 @@ export function OrganizationManagementView() {
   const [activeOrganization, setActiveOrganization] = useState<Organization | null>(null);
   const [teamsInActiveOrg, setTeamsInActiveOrg] = useState<Team[]>([]);
   const [activeOrgMembers, setActiveOrgMembers] = useState<AppUser[]>([]);
-  
+  const [activeTeamMembers, setActiveTeamMembers] = useState<AppUser[]>([]); // New state for team members
+
   const [isLoadingOrgs, setIsLoadingOrgs] = useState(false);
   const [isLoadingTeams, setIsLoadingTeams] = useState(false);
   const [isLoadingOrgMembers, setIsLoadingOrgMembers] = useState(false);
-  
+  const [isLoadingTeamMembers, setIsLoadingTeamMembers] = useState(false); // New loading state
+
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
 
-  // State for Create Organization Form
   const [newOrgName, setNewOrgName] = useState('');
   const [newOrgDescription, setNewOrgDescription] = useState('');
   const [isCreatingOrg, setIsCreatingOrg] = useState(false);
 
-  // State for Join Organization Form
   const [joinInviteCode, setJoinInviteCode] = useState('');
   const [isJoiningOrg, setIsJoiningOrg] = useState(false);
 
-  // State for Create Team Form
   const [newTeamName, setNewTeamName] = useState('');
   const [newTeamDescription, setNewTeamDescription] = useState('');
   const [isCreatingTeam, setIsCreatingTeam] = useState(false);
 
   const [expandedOrgId, setExpandedOrgId] = useState<string | null>(null);
-
+  const [expandedTeamId, setExpandedTeamId] = useState<string | null>(null); // New state for expanded team
 
   const fetchOrganizationsAndSetActive = useCallback(async () => {
     if (!currentUser || currentUser.isGuest) return;
@@ -72,12 +72,7 @@ export function OrganizationManagementView() {
       if (currentUser.defaultOrganizationId) {
         const currentActiveOrg = orgs.find(o => o.id === currentUser.defaultOrganizationId);
         setActiveOrganization(currentActiveOrg || null);
-        if (currentActiveOrg) setExpandedOrgId(currentActiveOrg.id); // Expand the default org
-      } else if (orgs.length > 0) {
-        // setActiveOrganization(orgs[0]); // Optionally default to first org
-        // setExpandedOrgId(orgs[0].id);
-         setActiveOrganization(null); // Or no default selection initially
-         setExpandedOrgId(null);
+        if (currentActiveOrg) setExpandedOrgId(currentActiveOrg.id);
       } else {
         setActiveOrganization(null);
         setExpandedOrgId(null);
@@ -94,7 +89,6 @@ export function OrganizationManagementView() {
     fetchOrganizationsAndSetActive();
   }, [fetchOrganizationsAndSetActive]);
 
-  // Fetch teams when activeOrganization changes
   useEffect(() => {
     const fetchTeams = async () => {
       if (activeOrganization && currentUser && !currentUser.isGuest) {
@@ -115,12 +109,10 @@ export function OrganizationManagementView() {
     fetchTeams();
   }, [activeOrganization, currentUser, getUserTeams, toast]);
 
-  // Fetch organization members when activeOrganization changes
   useEffect(() => {
-    const fetchMembers = async () => {
-      if (activeOrganization && currentUser && !currentUser.isGuest) {
+    const fetchOrgMembers = async () => {
+      if (activeOrganization && currentUser && !currentUser.isGuest && expandedOrgId === activeOrganization.id) {
         setIsLoadingOrgMembers(true);
-        // No need to setExpandedOrgId here, it's handled by Accordion's onValueChange or default from org list load
         try {
           const members = await getOrganizationMembers(activeOrganization.id);
           setActiveOrgMembers(members);
@@ -134,22 +126,39 @@ export function OrganizationManagementView() {
         setActiveOrgMembers([]);
       }
     };
-    if(expandedOrgId === activeOrganization?.id){ // Fetch members only if the active org is the expanded one
-        fetchMembers();
-    } else {
-        setActiveOrgMembers([]); // Clear members if the expanded org is not the active one
-    }
-  }, [activeOrganization, currentUser, getOrganizationMembers, toast, expandedOrgId]);
+    fetchOrgMembers();
+  }, [activeOrganization, expandedOrgId, currentUser, getOrganizationMembers, toast]);
 
+  // Effect to fetch team members when a team is expanded
+  useEffect(() => {
+    const fetchTeamMembersData = async () => {
+      if (expandedTeamId && currentUser && !currentUser.isGuest) {
+        setIsLoadingTeamMembers(true);
+        setActiveTeamMembers([]); // Clear previous members
+        try {
+          const members = await getTeamMembers(expandedTeamId);
+          setActiveTeamMembers(members);
+        } catch (error) {
+          console.error(`Error fetching members for team ${expandedTeamId}:`, error);
+          toast({ title: "Error", description: "Could not load team members.", variant: "destructive" });
+        } finally {
+          setIsLoadingTeamMembers(false);
+        }
+      } else {
+        setActiveTeamMembers([]); // Clear if no team is expanded
+      }
+    };
+    fetchTeamMembersData();
+  }, [expandedTeamId, currentUser, getTeamMembers, toast]);
 
   const handleSetCurrentOrg = async (orgId: string) => {
     if (!currentUser) return;
-    setIsLoadingOrgs(true); 
+    setIsLoadingOrgs(true);
     try {
       await setCurrentOrganization(orgId);
       const selectedOrg = userOrganizations.find(o => o.id === orgId);
-      setActiveOrganization(selectedOrg || null); // Update local active state immediately
-      // expandedOrgId will be set by Accordion's onValueChange
+      setActiveOrganization(selectedOrg || null);
+      // expandedOrgId is set by Accordion onValueChange
       toast({ title: "Active Organization Set", description: `${selectedOrg?.name || 'Organization'} is now your active context.` });
     } catch (error) {
         toast({ title: "Error", description: "Failed to set active organization.", variant: "destructive" });
@@ -157,7 +166,7 @@ export function OrganizationManagementView() {
         setIsLoadingOrgs(false);
     }
   };
-  
+
   const handleCopyInviteCode = (code: string) => {
     navigator.clipboard.writeText(code).then(() => {
       setCopiedCode(code);
@@ -171,11 +180,11 @@ export function OrganizationManagementView() {
 
   const handleJoinTeamAttempt = async (teamId: string, teamName: string) => {
     if (!currentUser || !activeOrganization) return;
-    setIsLoadingTeams(true); 
+    setIsLoadingTeams(true);
     const success = await joinTeam(teamId);
     if (success) {
       toast({ title: "Joined Team", description: `You have successfully joined "${teamName}".`});
-      const teams = await getUserTeams(activeOrganization.id); 
+      const teams = await getUserTeams(activeOrganization.id);
       setTeamsInActiveOrg(teams);
     }
     setIsLoadingTeams(false);
@@ -192,7 +201,7 @@ export function OrganizationManagementView() {
     if (createdOrg) {
       setNewOrgName('');
       setNewOrgDescription('');
-      await fetchOrganizationsAndSetActive(); 
+      await fetchOrganizationsAndSetActive();
     }
     setIsCreatingOrg(false);
   };
@@ -207,7 +216,7 @@ export function OrganizationManagementView() {
     const joinedOrg = await joinOrganizationByInviteCode(joinInviteCode.trim().toUpperCase());
     if (joinedOrg) {
       setJoinInviteCode('');
-      await fetchOrganizationsAndSetActive(); 
+      await fetchOrganizationsAndSetActive();
     }
     setIsJoiningOrg(false);
   };
@@ -227,7 +236,7 @@ export function OrganizationManagementView() {
     if (createdTeam) {
       setNewTeamName('');
       setNewTeamDescription('');
-      const teams = await getUserTeams(activeOrganization.id); 
+      const teams = await getUserTeams(activeOrganization.id);
       setTeamsInActiveOrg(teams);
     }
     setIsCreatingTeam(false);
@@ -273,26 +282,26 @@ export function OrganizationManagementView() {
                 <p className="text-muted-foreground py-10 text-center">You are not part of any organizations yet. Use the 'Create / Join' tab.</p>
               )}
               <ScrollArea className={cn(userOrganizations.length > 0 ? "max-h-[300px]" : "")}>
-                 <Accordion 
-                    type="single" 
-                    collapsible 
-                    className="w-full" 
-                    value={expandedOrgId || ""} 
+                 <Accordion
+                    type="single"
+                    collapsible
+                    className="w-full"
+                    value={expandedOrgId || ""}
                     onValueChange={(value) => {
                         setExpandedOrgId(value);
                         const orgToSetActive = userOrganizations.find(o => o.id === value);
                         if (orgToSetActive) {
-                            setActiveOrganization(orgToSetActive); // Set as active for team/member fetching
+                            setActiveOrganization(orgToSetActive);
                         } else {
-                            setActiveOrganization(null); // Clear active if accordion closes or value is invalid
+                            setActiveOrganization(null);
                         }
                     }}
                 >
                   {userOrganizations.map(org => (
                     <AccordionItem value={org.id} key={org.id} className="mb-2 border rounded-lg shadow-sm hover:shadow-md transition-shadow bg-card overflow-hidden">
-                      <AccordionTrigger
+                       <AccordionTrigger
                         className="p-3.5 w-full text-left hover:bg-muted/50 data-[state=open]:bg-muted/60"
-                        // onClick to set active context is combined with onValueChange of Accordion
+                        onClick={() => handleSetCurrentOrg(org.id)}
                       >
                         <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-2 w-full">
                           <span className="font-semibold text-lg">{org.name}</span>
@@ -302,15 +311,9 @@ export function OrganizationManagementView() {
                                 variant: currentUser.defaultOrganizationId === org.id ? "default" : "outline",
                                 size: "sm"
                               }),
-                              "pointer-events-none", // Makes it non-interactive, click handled by trigger
-                              isLoadingOrgs && "opacity-50" // Already handled by buttonVariants disabled state
+                              "pointer-events-none",
+                              isLoadingOrgs && "opacity-50"
                             )}
-                            onClick={(e) => { // Stop propagation if clicked, actual set is by trigger
-                                e.stopPropagation(); 
-                                if(currentUser.defaultOrganizationId !== org.id) {
-                                   handleSetCurrentOrg(org.id); // Allow explicit click to also set as default context
-                                }
-                            }}
                           >
                             {currentUser.defaultOrganizationId === org.id ? <Check className="mr-1 h-4 w-4"/> : null}
                             {currentUser.defaultOrganizationId === org.id ? 'Active Context' : 'Set Active'}
@@ -373,51 +376,76 @@ export function OrganizationManagementView() {
                   <p className="text-muted-foreground py-6 text-center">No teams found in this organization yet.</p>
                 )}
                 <ScrollArea className={cn(teamsInActiveOrg.length > 0 ? "max-h-[300px]" : "")}>
-                  <ul className="space-y-3 pr-3">
+                  <Accordion type="single" collapsible className="w-full" value={expandedTeamId || ""} onValueChange={setExpandedTeamId}>
                     {teamsInActiveOrg.map(team => {
                       const isMember = team.memberIds.includes(currentUser.id);
                       return (
-                        <li key={team.id} className="p-3.5 border rounded-lg shadow-sm hover:shadow-md transition-shadow bg-card">
-                          <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-2">
-                            <span className="font-semibold text-lg">{team.name}</span>
-                            {isMember ? (
-                              <Badge variant="secondary" className="text-xs self-start sm:self-center px-2 py-1">
-                                <Check className="mr-1 h-3 w-3 text-green-600" /> Member
-                              </Badge>
-                            ) : (
-                              <Button variant="outline" size="sm" onClick={() => handleJoinTeamAttempt(team.id, team.name)} className="w-full sm:w-auto" disabled={isLoadingTeams}>
-                                <UserPlus className="mr-1.5 h-4 w-4" /> Join Team
-                              </Button>
+                        <AccordionItem value={team.id} key={team.id} className="mb-2 border rounded-lg shadow-sm hover:shadow-md transition-shadow bg-card overflow-hidden">
+                          <AccordionTrigger className="p-3.5 w-full text-left hover:bg-muted/50 data-[state=open]:bg-muted/60">
+                            <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-2 w-full">
+                                <span className="font-semibold text-lg">{team.name}</span>
+                                {isMember ? (
+                                  <Badge variant="secondary" className="text-xs self-start sm:self-center px-2 py-1">
+                                    <Check className="mr-1 h-3 w-3 text-green-600" /> Member
+                                  </Badge>
+                                ) : (
+                                  <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); handleJoinTeamAttempt(team.id, team.name);}} className="w-full sm:w-auto" disabled={isLoadingTeams}>
+                                    <UserPlus className="mr-1.5 h-4 w-4" /> Join Team
+                                  </Button>
+                                )}
+                            </div>
+                          </AccordionTrigger>
+                          <AccordionContent className="p-3.5 pt-0">
+                            {team.description && <p className="text-sm text-muted-foreground mt-1 mb-2">{team.description}</p>}
+                            <p className="text-xs text-muted-foreground">Members: {team.memberIds.length}</p>
+                             <Separator className="my-3" />
+                            <h5 className="text-md font-semibold mb-2">Team Members ({activeTeamMembers.length})</h5>
+                            {isLoadingTeamMembers && expandedTeamId === team.id && <Loader2 className="h-5 w-5 animate-spin my-2" />}
+                            {!isLoadingTeamMembers && expandedTeamId === team.id && activeTeamMembers.length === 0 && <p className="text-xs text-muted-foreground">No members in this team.</p>}
+                            {!isLoadingTeamMembers && expandedTeamId === team.id && activeTeamMembers.length > 0 && (
+                              <ScrollArea className="max-h-[150px] pr-2">
+                                <ul className="space-y-1.5">
+                                  {activeTeamMembers.map(member => (
+                                    <li key={member.id} className="flex items-center gap-2 text-sm p-1.5 rounded hover:bg-muted/30">
+                                      <Avatar className="h-7 w-7">
+                                          <AvatarImage src={member.photoURL || undefined} alt={member.displayName || 'User'} />
+                                          <AvatarFallback className="text-xs">
+                                              {member.displayName ? member.displayName.charAt(0).toUpperCase() : <UserCircle size={14}/>}
+                                          </AvatarFallback>
+                                      </Avatar>
+                                      <span className="truncate">{member.displayName || member.email}</span>
+                                    </li>
+                                  ))}
+                                </ul>
+                              </ScrollArea>
                             )}
-                          </div>
-                          {team.description && <p className="text-sm text-muted-foreground mt-1">{team.description}</p>}
-                           <p className="text-xs text-muted-foreground mt-1">Members: {team.memberIds.length}</p>
-                        </li>
+                          </AccordionContent>
+                        </AccordionItem>
                       );
                     })}
-                  </ul>
+                  </Accordion>
                 </ScrollArea>
                 <Separator className="my-4" />
                 <form onSubmit={handleCreateTeamSubmit} className="space-y-3">
                     <h4 className="text-md font-semibold">Create New Team in &quot;{activeOrganization.name}&quot;</h4>
                     <div>
                         <Label htmlFor="new-team-name">Team Name</Label>
-                        <Input 
-                            id="new-team-name" 
-                            value={newTeamName} 
-                            onChange={(e) => setNewTeamName(e.target.value)} 
-                            placeholder="e.g., Engineering Avengers" 
+                        <Input
+                            id="new-team-name"
+                            value={newTeamName}
+                            onChange={(e) => setNewTeamName(e.target.value)}
+                            placeholder="e.g., Engineering Avengers"
                             disabled={isCreatingTeam}
                             className="mt-1"
                         />
                     </div>
                     <div>
                         <Label htmlFor="new-team-description">Team Description (Optional)</Label>
-                        <Textarea 
-                            id="new-team-description" 
-                            value={newTeamDescription} 
-                            onChange={(e) => setNewTeamDescription(e.target.value)} 
-                            placeholder="What this team will conquer" 
+                        <Textarea
+                            id="new-team-description"
+                            value={newTeamDescription}
+                            onChange={(e) => setNewTeamDescription(e.target.value)}
+                            placeholder="What this team will conquer"
                             disabled={isCreatingTeam}
                             className="mt-1"
                         />
@@ -431,7 +459,7 @@ export function OrganizationManagementView() {
             </Card>
           )}
         </TabsContent>
-        
+
         <TabsContent value="manage-orgs" className="space-y-6">
            <Card>
             <CardHeader>
@@ -442,22 +470,22 @@ export function OrganizationManagementView() {
                 <form onSubmit={handleCreateOrganizationSubmit} className="space-y-4">
                     <div>
                         <Label htmlFor="new-org-name">Organization Name</Label>
-                        <Input 
-                            id="new-org-name" 
-                            value={newOrgName} 
-                            onChange={(e) => setNewOrgName(e.target.value)} 
-                            placeholder="e.g., Innovatech Solutions" 
+                        <Input
+                            id="new-org-name"
+                            value={newOrgName}
+                            onChange={(e) => setNewOrgName(e.target.value)}
+                            placeholder="e.g., Innovatech Solutions"
                             disabled={isCreatingOrg}
                             className="mt-1"
                         />
                     </div>
                     <div>
                         <Label htmlFor="new-org-description">Description (Optional)</Label>
-                        <Textarea 
-                            id="new-org-description" 
-                            value={newOrgDescription} 
-                            onChange={(e) => setNewOrgDescription(e.target.value)} 
-                            placeholder="Briefly describe your organization's purpose" 
+                        <Textarea
+                            id="new-org-description"
+                            value={newOrgDescription}
+                            onChange={(e) => setNewOrgDescription(e.target.value)}
+                            placeholder="Briefly describe your organization's purpose"
                             disabled={isCreatingOrg}
                             className="mt-1"
                         />
@@ -479,11 +507,11 @@ export function OrganizationManagementView() {
                     <form onSubmit={handleJoinOrganizationSubmit} className="space-y-4">
                         <div>
                             <Label htmlFor="join-invite-code">Invite Code</Label>
-                            <Input 
-                                id="join-invite-code" 
-                                value={joinInviteCode} 
-                                onChange={(e) => setJoinInviteCode(e.target.value.toUpperCase())} 
-                                placeholder="ABC12" 
+                            <Input
+                                id="join-invite-code"
+                                value={joinInviteCode}
+                                onChange={(e) => setJoinInviteCode(e.target.value.toUpperCase())}
+                                placeholder="ABC12"
                                 maxLength={5}
                                 disabled={isJoiningOrg}
                                 className="mt-1 uppercase tracking-widest"
