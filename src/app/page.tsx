@@ -19,11 +19,12 @@ import {
 import { KanbanBoard } from "@/components/kanban-board";
 import { AiChat } from "@/components/ai-chat";
 import { SettingsView } from '@/components/settings-view';
-import { TaskOptimizationView } from '@/components/task-optimization-view'; // New View
+import { TaskOptimizationView } from '@/components/task-optimization-view';
+import { OrganizationManagementView } from '@/components/organization-management-view'; // New View
 import { ChatLayout } from '@/components/chat/ChatLayout';
-import { Bot, CheckSquare, ListTodo, Settings, Star, Menu, FolderKanban, PlusCircle, Edit3, Trash2, Palette, LogOut, Database, Zap, User, Chrome, FolderPlus, FolderSymlink, Folders, Users, Building, Briefcase, MessageSquare, LogIn, MoreVertical, UserPlus, Sparkles } from "lucide-react"; // Added Sparkles
+import { Bot, CheckSquare, ListTodo, Settings, Star, Menu, FolderKanban, PlusCircle, Edit3, Trash2, Palette, LogOut, Database, Zap, User, Chrome, FolderPlus, FolderSymlink, Folders, Users, Building, Briefcase, MessageSquare, LogIn, MoreVertical, UserPlus, Sparkles } from "lucide-react";
 import { useSidebar } from '@/components/ui/sidebar';
-import { Button, buttonVariants } from '@/components/ui/button';
+import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useTasks } from '@/contexts/TaskContext';
 import type { Board, BoardGroup, Organization, Team } from '@/types';
@@ -58,20 +59,20 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from '@/hooks/use-toast';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { useIsMobile } from '@/hooks/use-mobile';
 
 
-type ActiveView = 'board' | 'ai-assistant' | 'task-optimization' | 'settings' | 'organizations' | 'teams' | 'chat';
+type ActiveView = 'board' | 'ai-assistant' | 'task-optimization' | 'settings' | 'chat' | 'organization-management';
 
 export default function Home() {
   const {
     currentUser, loading: authLoading, logout, currentProvider, isGuest, exitGuestMode,
-    createOrganization, createTeam, getUserOrganizations, getUserTeams, setCurrentOrganization, joinOrganizationByInviteCode, joinTeam
+    getUserOrganizations, getUserTeams, setCurrentOrganization, joinOrganizationByInviteCode, joinTeam
   } = useAuth();
   const router = useRouter();
   const [activeView, setActiveView] = useState<ActiveView>('board');
@@ -79,8 +80,8 @@ export default function Home() {
   const isMobile = useIsMobile();
 
   const {
-    boards, activeBoardId, setActiveBoardId, getActiveBoard, deleteBoard, addBoard: addTaskBoard, 
-    boardGroups, addBoardGroup, deleteBoardGroup, updateBoardGroupName, addBoardToGroup, removeBoardFromGroup, updateBoardGroupId
+    boards, activeBoardId, setActiveBoardId, getActiveBoard, deleteBoard, addBoard: addTaskBoard,
+    boardGroups, addBoardGroup, deleteBoardGroup, updateBoardGroupName, addBoardToGroup, removeBoardFromGroup
   } = useTasks();
   const { toast } = useToast();
 
@@ -94,11 +95,13 @@ export default function Home() {
   const [groupToRename, setGroupToRename] = useState<BoardGroup | undefined>(undefined);
   const [targetGroupIdForNewBoard, setTargetGroupIdForNewBoard] = useState<string | null | undefined>(undefined);
 
+  // These dialog states might be moved to the new OrganizationManagementView or SettingsView later
   const [isCreateOrgDialogOpen, setIsCreateOrgDialogOpen] = useState(false);
   const [isJoinOrgDialogOpen, setIsJoinOrgDialogOpen] = useState(false);
   const [isCreateTeamDialogOpen, setIsCreateTeamDialogOpen] = useState(false);
+
   const [userOrganizations, setUserOrganizations] = useState<Organization[]>([]);
-  const [userTeams, setUserTeams] = useState<Team[]>([]);
+  const [userTeams, setUserTeams] = useState<Team[]>([]); // This will be managed within OrganizationManagementView or SettingsView
   const [selectedOrgForTeamCreation, setSelectedOrgForTeamCreation] = useState<string | null>(null);
 
 
@@ -114,29 +117,19 @@ export default function Home() {
     }
   }, [activeBoardId, boards, setActiveBoardId, currentUser, isGuest]);
 
-  const fetchUserOrgsAndTeams = useCallback(async () => {
+  const fetchUserOrgs = useCallback(async () => {
     if (currentUser && !isGuest) {
         const orgs = await getUserOrganizations();
         setUserOrganizations(orgs);
-        if (currentUser.defaultOrganizationId) {
-            const teamsInDefaultOrg = await getUserTeams(currentUser.defaultOrganizationId);
-            setUserTeams(teamsInDefaultOrg);
-        } else if (orgs.length > 0) {
-             const teamsInFirstOrg = await getUserTeams(orgs[0].id); 
-             setUserTeams(teamsInFirstOrg);
-        } else {
-            setUserTeams([]);
-        }
     } else {
         setUserOrganizations([]);
-        setUserTeams([]);
     }
-  }, [currentUser, isGuest, getUserOrganizations, getUserTeams]);
+  }, [currentUser, isGuest, getUserOrganizations]);
 
 
   useEffect(() => {
-    fetchUserOrgsAndTeams();
-  }, [fetchUserOrgsAndTeams, currentUser?.defaultOrganizationId]);
+    fetchUserOrgs();
+  }, [fetchUserOrgs]);
 
 
   if (authLoading || (!currentUser && !isGuest && activeView !== 'chat')) {
@@ -152,14 +145,12 @@ export default function Home() {
 
   const getHeaderText = () => {
     const activeBoard = getActiveBoard();
-    const currentOrg = userOrganizations.find(org => org.id === currentUser?.defaultOrganizationId);
     switch (activeView) {
       case 'board': return activeBoard ? activeBoard.name : 'Kanban Board';
       case 'ai-assistant': return 'AI Assistant (Jack)';
       case 'task-optimization': return 'Task Optimization';
       case 'settings': return 'Settings';
-      case 'organizations': return 'My Organizations';
-      case 'teams': return currentOrg ? `Teams in ${currentOrg.name}` : 'My Teams';
+      case 'organization-management': return 'Organization Management';
       case 'chat': return 'Team Chat';
       default: return 'TaskZenith';
     }
@@ -234,16 +225,6 @@ export default function Home() {
     return null;
   }
 
-  const handleOpenCreateTeamDialog = (orgId: string) => {
-    setSelectedOrgForTeamCreation(orgId);
-    setIsCreateTeamDialogOpen(true);
-    if (isMobile) setSidebarOpen(false);
-  };
-
-  const handleSetCurrentOrg = async (orgId: string | null) => {
-    await setCurrentOrganization(orgId);
-    if (isMobile) setSidebarOpen(false);
-  };
 
   const handleViewChange = (newView: ActiveView) => {
     setActiveView(newView);
@@ -252,14 +233,7 @@ export default function Home() {
     }
   };
 
-  const handleJoinTeamAttempt = async (teamId: string, teamName: string) => {
-    if (!currentUser) return;
-    const success = await joinTeam(teamId);
-    if (success) {
-      setTimeout(() => toast({ title: "Joined Team", description: `You have successfully joined "${teamName}".`}), 0);
-      fetchUserOrgsAndTeams(); 
-    }
-  };
+
 
 
   return (
@@ -288,78 +262,14 @@ export default function Home() {
           <SidebarMenu>
             {!isGuest && currentUser && (
               <SidebarMenuItem>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <SidebarMenuButton tooltip="Organizations" className="w-full hover:bg-sidebar-accent/80 dark:hover:bg-sidebar-accent/50">
-                      <Building /> Organizations
-                    </SidebarMenuButton>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent className="w-64 ml-2" side="right" align="start">
-                    <DropdownMenuLabel>My Organizations</DropdownMenuLabel>
-                    <DropdownMenuSeparator />
-                    {userOrganizations.length === 0 && <DropdownMenuItem disabled>No organizations yet.</DropdownMenuItem>}
-                    {userOrganizations.map(org => (
-                      <DropdownMenuItem
-                        key={org.id}
-                        onClick={() => handleSetCurrentOrg(org.id)}
-                        className={cn("flex justify-between items-center", org.id === currentUser.defaultOrganizationId && "bg-accent text-accent-foreground")}
-                      >
-                        <span>{org.name}</span>
-                        {org.id === currentUser.defaultOrganizationId && <CheckSquare className="h-4 w-4 text-primary" title="Active Organization"/>}
-                      </DropdownMenuItem>
-                    ))}
-                     <DropdownMenuSeparator />
-                     <DropdownMenuItem onClick={() => { setIsCreateOrgDialogOpen(true); if (isMobile) setSidebarOpen(false);}}>
-                       <PlusCircle className="mr-2 h-4 w-4" /> Create Organization
-                     </DropdownMenuItem>
-                     <DropdownMenuItem onClick={() => { setIsJoinOrgDialogOpen(true); if (isMobile) setSidebarOpen(false); }}>
-                       <LogIn className="mr-2 h-4 w-4" /> Join Organization
-                     </DropdownMenuItem>
-                     {currentUser.defaultOrganizationId && (
-                        <DropdownMenuItem onClick={() => handleSetCurrentOrg(null)}>
-                            Clear Default Organization
-                        </DropdownMenuItem>
-                     )}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </SidebarMenuItem>
-            )}
-
-            {!isGuest && currentUser && currentUser.defaultOrganizationId && (
-              <SidebarMenuItem>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <SidebarMenuButton tooltip="Teams" className="w-full hover:bg-sidebar-accent/80 dark:hover:bg-sidebar-accent/50">
-                      <Users /> Teams
-                    </SidebarMenuButton>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent className="w-64 ml-2" side="right" align="start">
-                    <DropdownMenuLabel>
-                        Teams in {userOrganizations.find(o => o.id === currentUser.defaultOrganizationId)?.name || 'Current Org'}
-                    </DropdownMenuLabel>
-                    <DropdownMenuSeparator />
-                    {userTeams.length === 0 && <DropdownMenuItem disabled>No teams in this org yet.</DropdownMenuItem>}
-                    {userTeams.map(team => {
-                      const isMember = team.memberIds.includes(currentUser.id);
-                      return (
-                        <DropdownMenuItem key={team.id} className="flex justify-between items-center">
-                          <span>{team.name}</span>
-                          {isMember ? (
-                            <CheckSquare className="h-4 w-4 text-green-500" title="You are a member"/>
-                          ) : (
-                            <Button variant="ghost" size="xs" className="h-6 px-1.5 text-xs" onClick={(e) => {e.stopPropagation(); handleJoinTeamAttempt(team.id, team.name);}}>
-                               <UserPlus className="mr-1 h-3 w-3"/> Join
-                            </Button>
-                          )}
-                        </DropdownMenuItem>
-                      );
-                    })}
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem onClick={() => { if(currentUser.defaultOrganizationId) handleOpenCreateTeamDialog(currentUser.defaultOrganizationId);}}>
-                      <PlusCircle className="mr-2 h-4 w-4" /> Create New Team
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                <SidebarMenuButton
+                  tooltip="Organizations"
+                  isActive={activeView === 'organization-management'}
+                  onClick={() => handleViewChange('organization-management')}
+                  className="w-full hover:bg-sidebar-accent/80 dark:hover:bg-sidebar-accent/50"
+                >
+                  <Building /> Organizations
+                </SidebarMenuButton>
               </SidebarMenuItem>
             )}
             <SidebarSeparator />
@@ -707,61 +617,7 @@ export default function Home() {
           {activeView === 'chat' && <ChatLayout />}
           {activeView === 'task-optimization' && <TaskOptimizationView />}
           {activeView === 'settings' && <SettingsView />}
-          {activeView === 'organizations' && !isGuest && currentUser &&(
-            <div className="p-4">
-              <h2 className="text-2xl font-semibold mb-4">My Organizations</h2>
-              {userOrganizations.length === 0 ? (
-                <p>You are not part of any organization yet.</p>
-              ) : (
-                <ul className="space-y-2">
-                  {userOrganizations.map(org => (
-                    <li key={org.id} className="p-3 border rounded-md shadow-sm hover:bg-muted/30">
-                      {org.name} {org.id === currentUser.defaultOrganizationId && <span className="text-xs text-primary ml-2">(Default)</span>}
-                      <Button variant="link" size="sm" onClick={() => handleSetCurrentOrg(org.id)} className="ml-2">Set as Default</Button>
-                      <Button variant="link" size="sm" onClick={() => {setSelectedOrgForTeamCreation(org.id); setIsCreateTeamDialogOpen(true)}} className="ml-2">Add Team</Button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-               <div className="flex flex-col sm:flex-row gap-2 mt-4">
-                 <Button onClick={() => setIsCreateOrgDialogOpen(true)} className="flex-1">
-                    <Briefcase className="mr-2 h-4 w-4" /> Create Organization
-                  </Button>
-                  <Button onClick={() => setIsJoinOrgDialogOpen(true)} variant="outline" className="flex-1">
-                     <LogIn className="mr-2 h-4 w-4" /> Join by Code
-                  </Button>
-               </div>
-            </div>
-          )}
-          {activeView === 'teams' && !isGuest && currentUser && currentUser.defaultOrganizationId && (
-            <div className="p-4">
-              <h2 className="text-2xl font-semibold mb-4">Teams in {userOrganizations.find(o => o.id === currentUser?.defaultOrganizationId)?.name}</h2>
-              {userTeams.length === 0 ? (
-                <p>No teams in this organization yet.</p>
-              ) : (
-                <ul className="space-y-2">
-                  {userTeams.map(team => {
-                    const isMember = team.memberIds.includes(currentUser.id);
-                    return (
-                      <li key={team.id} className="p-3 border rounded-md shadow-sm flex justify-between items-center">
-                        <span>{team.name}</span>
-                        {isMember ? (
-                          <Badge variant="secondary" className="text-xs">Member</Badge>
-                        ) : (
-                          <Button variant="outline" size="sm" onClick={() => handleJoinTeamAttempt(team.id, team.name)}>
-                            <UserPlus className="mr-1 h-3 w-3" /> Join Team
-                          </Button>
-                        )}
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-              <Button onClick={() => currentUser.defaultOrganizationId && handleOpenCreateTeamDialog(currentUser.defaultOrganizationId)} className="mt-4">
-                <Users className="mr-2 h-4 w-4" /> Create Team
-              </Button>
-            </div>
-          )}
+          {activeView === 'organization-management' && <OrganizationManagementView />}
         </main>
       </SidebarInset>
       <CreateBoardDialog
@@ -773,30 +629,30 @@ export default function Home() {
       <BoardThemeCustomizer board={getActiveBoard()} open={isThemeCustomizerOpen} onOpenChange={setIsThemeCustomizerOpen} />
       <CreateBoardGroupDialog open={isCreateGroupDialogOpen} onOpenChange={setIsCreateGroupDialogOpen} />
       <RenameBoardGroupDialog group={groupToRename} open={isRenameGroupDialogOpen} onOpenChange={setIsRenameGroupDialogOpen} />
+      {/* Dialogs for org/team creation will be moved or replaced by inline forms in OrganizationManagementView */}
       <CreateOrganizationDialog
         open={isCreateOrgDialogOpen}
         onOpenChange={(isOpen) => {
             setIsCreateOrgDialogOpen(isOpen);
-            if(isOpen === false) fetchUserOrgsAndTeams();
+            if(isOpen === false) fetchUserOrgs();
         }}
       />
       <JoinOrganizationDialog
         open={isJoinOrgDialogOpen}
         onOpenChange={(isOpen) => {
             setIsJoinOrgDialogOpen(isOpen);
-            if(isOpen === false) fetchUserOrgsAndTeams();
+            if(isOpen === false) fetchUserOrgs();
         }}
-        onOrgJoined={fetchUserOrgsAndTeams}
+        onOrgJoined={fetchUserOrgs}
       />
       <CreateTeamDialog
         open={isCreateTeamDialogOpen}
         onOpenChange={(isOpen) => {
             setIsCreateTeamDialogOpen(isOpen);
-            if(isOpen === false) fetchUserOrgsAndTeams();
+            // This might need to trigger a refresh within OrganizationManagementView if that view is active
         }}
         organizationId={selectedOrgForTeamCreation}
       />
     </div>
   );
 }
-
