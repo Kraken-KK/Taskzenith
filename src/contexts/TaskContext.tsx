@@ -2,7 +2,7 @@
 // src/contexts/TaskContext.tsx
 'use client';
 
-import type { Task, Column, ChecklistItem, Board, BoardTheme, BoardGroup } from '@/types';
+import type { Task, Column, ChecklistItem, Board, BoardTheme, BoardGroup, Subtask } from '@/types';
 import type { ReactNode } from 'react';
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import { useToast } from "@/hooks/use-toast";
@@ -34,6 +34,11 @@ const sanitizeAndAssignColumns = (columns: Column[] = []): Column[] => {
           id: ci.id || generateId('cl-item-sanitized'),
           text: ci.text || '',
           completed: ci.completed || false,
+        })) : [],
+        subtasks: Array.isArray(task.subtasks) ? task.subtasks.map(st => ({
+          id: st.id || generateId('subtask-sanitized'),
+          text: st.text || 'Untitled Subtask',
+          completed: st.completed || false,
         })) : [],
         tags: Array.isArray(task.tags) ? task.tags : [],
         assignedTo: Array.isArray(task.assignedTo) ? task.assignedTo : [],
@@ -70,7 +75,7 @@ const sanitizeBoardGroup = (group: Partial<BoardGroup>): BoardGroup => {
 const initialDefaultBoardForGuest = (): Board => sanitizeBoard({
     name: 'My Guest Board',
     columns: [
-      { id: generateId('col-guest'), title: 'To Do', tasks: [{ id: generateId('task-guest'), content: 'Welcome! Plan your day', priority: 'high', createdAt: formatISO(new Date()) } as Task], wipLimit: 0 },
+      { id: generateId('col-guest'), title: 'To Do', tasks: [{ id: generateId('task-guest'), content: 'Welcome! Plan your day', priority: 'high', createdAt: formatISO(new Date()), subtasks: [] } as Task], wipLimit: 0 },
       { id: generateId('col-guest'), title: 'In Progress', tasks: [], wipLimit: 0 },
       { id: generateId('col-guest'), title: 'Done', tasks: [], wipLimit: 0 },
     ],
@@ -96,7 +101,7 @@ interface TaskContextType {
   addBoardToGroup: (boardId: string, groupId: string) => void;
   removeBoardFromGroup: (boardId: string) => void; 
 
-  addTask: (taskData: Omit<Task, 'id' | 'status' | 'createdAt' | 'dependencies' | 'checklist' | 'tags' | 'assignedTo'> & Partial<Pick<Task, 'dependencies' | 'checklist' | 'tags' | 'description' | 'deadline' | 'assignedTo'>>, targetColumnId?: Column['id']) => void;
+  addTask: (taskData: Omit<Task, 'id' | 'status' | 'createdAt' | 'dependencies' | 'checklist' | 'tags' | 'assignedTo' | 'subtasks'> & Partial<Pick<Task, 'dependencies' | 'checklist' | 'tags' | 'description' | 'deadline' | 'assignedTo' | 'subtasks'>>, targetColumnId?: Column['id']) => void;
   moveTask: (taskId: string, sourceColumnId: Column['id'], targetColumnId: Column['id'], isBetaModeActive: boolean) => { task: Task | null, automated: boolean };
   deleteTask: (taskId: string, columnId: Column['id']) => void;
   updateTask: (updatedTaskData: Partial<Task> & { id: string }) => void;
@@ -112,6 +117,11 @@ interface TaskContextType {
   toggleChecklistItem: (taskId: string, columnId: string, itemId: string) => void;
   deleteChecklistItem: (taskId: string, columnId: string, itemId: string) => void;
   updateChecklistItemText: (taskId: string, columnId: string, itemId: string, newText: string) => void;
+
+  addSubtask: (taskId: string, columnId: string, subtaskText: string) => void;
+  toggleSubtask: (taskId: string, columnId: string, subtaskId: string) => void;
+  deleteSubtask: (taskId: string, columnId: string, subtaskId: string) => void;
+  updateSubtaskText: (taskId: string, columnId: string, subtaskId: string, newText: string) => void;
 }
 
 const TaskContext = createContext<TaskContextType | undefined>(undefined);
@@ -591,7 +601,7 @@ export function TaskProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const addTask = (taskData: Omit<Task, 'id' | 'status' | 'createdAt'> & Partial<Pick<Task, 'dependencies' | 'checklist' | 'tags' | 'description' | 'deadline' | 'assignedTo'>>, targetColumnIdInput?: Column['id']) => {
+  const addTask = (taskData: Omit<Task, 'id' | 'status' | 'createdAt'> & Partial<Pick<Task, 'dependencies' | 'checklist' | 'tags' | 'description' | 'deadline' | 'assignedTo' | 'subtasks'>>, targetColumnIdInput?: Column['id']) => {
     const board = getActiveBoard();
     if (!board) return;
     
@@ -606,6 +616,7 @@ export function TaskProvider({ children }: { children: ReactNode }) {
         description: taskData.description || null, deadline: taskData.deadline || null,
         tags: taskData.tags || [], 
         checklist: (taskData.checklist || []).map(ci => ({ id: ci.id || generateId('cl-item'), text: ci.text, completed: ci.completed })),
+        subtasks: (taskData.subtasks || []).map(st => ({ id: st.id || generateId('subtask'), text: st.text, completed: st.completed })),
         assignedTo: taskData.assignedTo || [], createdAt: formatISO(new Date()),
       };
       const newTask = sanitizeBoard({columns: [{id: finalTargetColumnId, tasks: [sanitizedPartialTask as Task]}]}).columns[0].tasks[0];
@@ -668,6 +679,7 @@ export function TaskProvider({ children }: { children: ReactNode }) {
         }
         return col;
       });
+      setTimeout(() => toast({ title: "Task Deleted" }), 0);
       return { ...currentBoard, columns: updatedBoardColumns };
     });
   };
@@ -821,6 +833,116 @@ export function TaskProvider({ children }: { children: ReactNode }) {
     });
   };
 
+  const addSubtask = (taskId: string, columnId: string, subtaskText: string) => {
+    const board = getActiveBoard();
+    if (!board) return;
+    modifyBoardData(board.id, (currentBoard) => {
+      const updatedCols = currentBoard.columns.map((col) => {
+        if (col.id === columnId) {
+          return {
+            ...col,
+            tasks: (col.tasks || []).map((task) => {
+              if (task.id === taskId) {
+                const newSubtask: Subtask = {
+                  id: generateId('subtask'),
+                  text: subtaskText,
+                  completed: false,
+                };
+                return { ...task, subtasks: [...(task.subtasks || []), newSubtask] };
+              }
+              return task;
+            }),
+          };
+        }
+        return col;
+      });
+      setTimeout(() => toast({ title: "Subtask Added" }), 0);
+      return { ...currentBoard, columns: updatedCols };
+    });
+  };
+
+  const toggleSubtask = (taskId: string, columnId: string, subtaskId: string) => {
+    const board = getActiveBoard();
+    if (!board) return;
+    modifyBoardData(board.id, (currentBoard) => {
+      const updatedCols = currentBoard.columns.map((col) => {
+        if (col.id === columnId) {
+          return {
+            ...col,
+            tasks: (col.tasks || []).map((task) => {
+              if (task.id === taskId && task.subtasks) {
+                return {
+                  ...task,
+                  subtasks: task.subtasks.map((sub) =>
+                    sub.id === subtaskId ? { ...sub, completed: !sub.completed } : sub
+                  ),
+                };
+              }
+              return task;
+            }),
+          };
+        }
+        return col;
+      });
+      return { ...currentBoard, columns: updatedCols };
+    });
+  };
+
+  const deleteSubtask = (taskId: string, columnId: string, subtaskId: string) => {
+    const board = getActiveBoard();
+    if (!board) return;
+    modifyBoardData(board.id, (currentBoard) => {
+      const updatedCols = currentBoard.columns.map((col) => {
+        if (col.id === columnId) {
+          return {
+            ...col,
+            tasks: (col.tasks || []).map((task) => {
+              if (task.id === taskId && task.subtasks) {
+                return {
+                  ...task,
+                  subtasks: task.subtasks.filter((sub) => sub.id !== subtaskId),
+                };
+              }
+              return task;
+            }),
+          };
+        }
+        return col;
+      });
+      setTimeout(() => toast({ title: "Subtask Deleted" }), 0);
+      return { ...currentBoard, columns: updatedCols };
+    });
+  };
+
+  const updateSubtaskText = (taskId: string, columnId: string, subtaskId: string, newText: string) => {
+    const board = getActiveBoard();
+    if (!board) return;
+    modifyBoardData(board.id, (currentBoard) => {
+      const updatedCols = currentBoard.columns.map((col) => {
+        if (col.id === columnId) {
+          return {
+            ...col,
+            tasks: (col.tasks || []).map((task) => {
+              if (task.id === taskId && task.subtasks) {
+                return {
+                  ...task,
+                  subtasks: task.subtasks.map((sub) =>
+                    sub.id === subtaskId ? { ...sub, text: newText } : sub
+                  ),
+                };
+              }
+              return task;
+            }),
+          };
+        }
+        return col;
+      });
+      setTimeout(() => toast({ title: "Subtask Updated" }), 0);
+      return { ...currentBoard, columns: updatedCols };
+    });
+  };
+
+
   if (isLoadingData && !isGuest) { 
      return (
       <TaskContext.Provider value={{ 
@@ -829,7 +951,8 @@ export function TaskProvider({ children }: { children: ReactNode }) {
         boardGroups: [], addBoardGroup: () => undefined, deleteBoardGroup: () => {}, updateBoardGroupName: () => {}, addBoardToGroup: () => {}, removeBoardFromGroup: () => {},
         addTask: () => {}, moveTask: () => ({task: null, automated: false }), deleteTask: () => {}, updateTask: () => {}, getTaskById: () => undefined, getAllTasksOfActiveBoard: () => [],
         addColumn: () => {}, updateColumnTitle: () => {}, deleteColumn: () => {}, updateColumnWipLimit: () => {},
-        addChecklistItem: () => {}, toggleChecklistItem: () => {}, deleteChecklistItem: () => {}, updateChecklistItemText: () => {}
+        addChecklistItem: () => {}, toggleChecklistItem: () => {}, deleteChecklistItem: () => {}, updateChecklistItemText: () => {},
+        addSubtask: () => {}, toggleSubtask: () => {}, deleteSubtask: () => {}, updateSubtaskText: () => {}
       }}>
         <div className="flex h-screen w-screen items-center justify-center bg-background">
           <svg className="animate-spin h-12 w-12 text-primary" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -847,7 +970,8 @@ export function TaskProvider({ children }: { children: ReactNode }) {
         boardGroups, addBoardGroup, deleteBoardGroup, updateBoardGroupName, addBoardToGroup, removeBoardFromGroup,
         addTask, moveTask, deleteTask, updateTask, getTaskById, getAllTasksOfActiveBoard,
         addColumn, updateColumnTitle, deleteColumn, updateColumnWipLimit,
-        addChecklistItem, toggleChecklistItem, deleteChecklistItem, updateChecklistItemText
+        addChecklistItem, toggleChecklistItem, deleteChecklistItem, updateChecklistItemText,
+        addSubtask, toggleSubtask, deleteSubtask, updateSubtaskText
     }}>
       {children}
     </TaskContext.Provider>

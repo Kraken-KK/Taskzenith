@@ -1,6 +1,13 @@
 
 // src/types/index.ts
 
+// Define the structure of a subtask item
+export interface Subtask {
+  id: string;
+  text: string;
+  completed: boolean;
+}
+
 // Define the structure of a checklist item
 export interface ChecklistItem {
   id: string;
@@ -27,6 +34,7 @@ export interface Task {
   description?: string | null; // More detailed description or null
   tags: string[]; // Task tags
   checklist: ChecklistItem[]; // Checklists
+  subtasks?: Subtask[]; // Array of subtasks
   createdAt: string; // ISO string format for task creation time
   assignedTo?: string[]; // User IDs of assignees, for team context
 }
@@ -139,14 +147,4 @@ export interface ChatRoom {
 export interface MessageHistoryItem {
   role: 'user' | 'model';
   parts: Array<{ text: string }>;
-}
-
-export interface AiChatSession {
-  id: string;
-  userId: string;
-  name: string;
-  createdAt: string; // ISO string
-  lastUpdatedAt: string; // ISO string
-  messages: MessageHistoryItem[];
-  status?: 'active' | 'archived'; // Optional: for future archiving feature
 }
