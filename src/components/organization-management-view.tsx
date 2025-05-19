@@ -3,7 +3,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { useAuth } from '@/contexts/AuthContext';
+import { useAuth, type AppUser } from '@/contexts/AuthContext';
 import type { Organization, Team } from '@/types';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -11,12 +11,15 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Building, Users, PlusCircle, LogIn, ClipboardCopy, Check, Settings2, Edit, Trash2, Loader2, UserPlus, Briefcase } from 'lucide-react';
+import { Building, Users, PlusCircle, LogIn, ClipboardCopy, Check, Settings2, Edit, Trash2, Loader2, UserPlus, Briefcase, UserCircle, Eye, ChevronDown, ChevronUp } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { ScrollArea } from './ui/scroll-area';
 import { Separator } from './ui/separator';
 import { Badge } from './ui/badge';
 import { cn } from '@/lib/utils';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+
 
 export function OrganizationManagementView() {
   const { 
@@ -27,16 +30,19 @@ export function OrganizationManagementView() {
     createOrganization,
     joinOrganizationByInviteCode,
     createTeam,
-    joinTeam
+    joinTeam,
+    getOrganizationMembers, // New function from AuthContext
   } = useAuth();
   const { toast } = useToast();
 
   const [userOrganizations, setUserOrganizations] = useState<Organization[]>([]);
   const [activeOrganization, setActiveOrganization] = useState<Organization | null>(null);
   const [teamsInActiveOrg, setTeamsInActiveOrg] = useState<Team[]>([]);
+  const [activeOrgMembers, setActiveOrgMembers] = useState<AppUser[]>([]); // For active org members
   
   const [isLoadingOrgs, setIsLoadingOrgs] = useState(false);
   const [isLoadingTeams, setIsLoadingTeams] = useState(false);
+  const [isLoadingOrgMembers, setIsLoadingOrgMembers] = useState(false); // Loading state for org members
   
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
 
@@ -54,14 +60,23 @@ export function OrganizationManagementView() {
   const [newTeamDescription, setNewTeamDescription] = useState('');
   const [isCreatingTeam, setIsCreatingTeam] = useState(false);
 
+  const [expandedOrgMembers, setExpandedOrgMembers] = useState<string | null>(null); // Org ID or null
+
+
   const fetchOrganizationsAndSetActive = useCallback(async () => {
     if (!currentUser || currentUser.isGuest) return;
     setIsLoadingOrgs(true);
     try {
       const orgs = await getUserOrganizations();
       setUserOrganizations(orgs);
-      const currentActiveOrg = orgs.find(o => o.id === currentUser.defaultOrganizationId);
-      setActiveOrganization(currentActiveOrg || (orgs.length > 0 ? orgs[0] : null));
+      if (currentUser.defaultOrganizationId) {
+        const currentActiveOrg = orgs.find(o => o.id === currentUser.defaultOrganizationId);
+        setActiveOrganization(currentActiveOrg || null);
+      } else if (orgs.length > 0) {
+        setActiveOrganization(orgs[0]); // Default to first org if no default is set
+      } else {
+        setActiveOrganization(null);
+      }
     } catch (error) {
       console.error("Error fetching organizations:", error);
       toast({ title: "Error", description: "Could not load your organizations.", variant: "destructive" });
@@ -74,8 +89,9 @@ export function OrganizationManagementView() {
     fetchOrganizationsAndSetActive();
   }, [fetchOrganizationsAndSetActive]);
 
+  // Fetch teams when activeOrganization changes
   useEffect(() => {
-    const fetchTeamsForActiveOrg = async () => {
+    const fetchTeams = async () => {
       if (activeOrganization && currentUser && !currentUser.isGuest) {
         setIsLoadingTeams(true);
         try {
@@ -91,8 +107,31 @@ export function OrganizationManagementView() {
         setTeamsInActiveOrg([]);
       }
     };
-    fetchTeamsForActiveOrg();
+    fetchTeams();
   }, [activeOrganization, currentUser, getUserTeams, toast]);
+
+  // Fetch organization members when activeOrganization changes
+  useEffect(() => {
+    const fetchMembers = async () => {
+      if (activeOrganization && currentUser && !currentUser.isGuest) {
+        setIsLoadingOrgMembers(true);
+        setExpandedOrgMembers(activeOrganization.id); // Auto-expand members for the active org
+        try {
+          const members = await getOrganizationMembers(activeOrganization.id);
+          setActiveOrgMembers(members);
+        } catch (error) {
+          console.error("Error fetching organization members:", error);
+          toast({ title: "Error", description: `Could not load members for ${activeOrganization.name}.`, variant: "destructive" });
+        } finally {
+          setIsLoadingOrgMembers(false);
+        }
+      } else {
+        setActiveOrgMembers([]);
+        setExpandedOrgMembers(null);
+      }
+    };
+    fetchMembers();
+  }, [activeOrganization, currentUser, getOrganizationMembers, toast]);
 
 
   const handleSetCurrentOrg = async (orgId: string) => {
@@ -100,6 +139,8 @@ export function OrganizationManagementView() {
     setIsLoadingOrgs(true); // Indicate loading while context might be changing
     try {
       await setCurrentOrganization(orgId);
+      // AuthContext will update currentUser, which triggers re-fetch of orgs and active org selection
+      // For immediate UI feedback, also update local activeOrganization
       const selectedOrg = userOrganizations.find(o => o.id === orgId);
       setActiveOrganization(selectedOrg || null);
       toast({ title: "Active Organization Set", description: `${selectedOrg?.name || 'Organization'} is now active.` });
@@ -123,7 +164,7 @@ export function OrganizationManagementView() {
 
   const handleJoinTeamAttempt = async (teamId: string, teamName: string) => {
     if (!currentUser || !activeOrganization) return;
-    setIsLoadingTeams(true);
+    setIsLoadingTeams(true); // Use team-specific loading
     const success = await joinTeam(teamId);
     if (success) {
       toast({ title: "Joined Team", description: `You have successfully joined "${teamName}".`});
@@ -133,7 +174,7 @@ export function OrganizationManagementView() {
     setIsLoadingTeams(false);
   };
 
-  const handleCreateOrganization = async (e: React.FormEvent) => {
+  const handleCreateOrganizationSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newOrgName.trim()) {
       toast({ title: "Validation Error", description: "Organization name cannot be empty.", variant: "destructive" });
@@ -149,7 +190,7 @@ export function OrganizationManagementView() {
     setIsCreatingOrg(false);
   };
 
-  const handleJoinOrganization = async (e: React.FormEvent) => {
+  const handleJoinOrganizationSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!joinInviteCode.trim()) {
       toast({ title: "Validation Error", description: "Invite code cannot be empty.", variant: "destructive" });
@@ -164,7 +205,7 @@ export function OrganizationManagementView() {
     setIsJoiningOrg(false);
   };
 
-  const handleCreateTeam = async (e: React.FormEvent) => {
+  const handleCreateTeamSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!activeOrganization) {
         toast({ title: "Error", description: "No active organization selected to add this team to.", variant: "destructive" });
@@ -205,14 +246,14 @@ export function OrganizationManagementView() {
       <Tabs defaultValue="my-organizations" className="w-full">
         <TabsList className="grid w-full grid-cols-1 sm:grid-cols-2 mb-4">
           <TabsTrigger value="my-organizations">My Organizations & Teams</TabsTrigger>
-          <TabsTrigger value="manage-orgs">Create / Join</TabsTrigger>
+          <TabsTrigger value="manage-orgs">Create / Join Organization</TabsTrigger>
         </TabsList>
 
         <TabsContent value="my-organizations" className="space-y-6">
           <Card>
             <CardHeader>
               <CardTitle>Your Organizations</CardTitle>
-              <CardDescription>Select an organization to view its teams or set it as your active context for board creation and other org-specific actions.</CardDescription>
+              <CardDescription>Select an organization to view its details, teams, and members. Set an active organization for board creation context.</CardDescription>
             </CardHeader>
             <CardContent>
               {isLoadingOrgs && (
@@ -225,34 +266,59 @@ export function OrganizationManagementView() {
                 <p className="text-muted-foreground py-10 text-center">You are not part of any organizations yet. Use the 'Create / Join' tab.</p>
               )}
               <ScrollArea className={cn(userOrganizations.length > 0 ? "max-h-[300px]" : "")}>
-                <ul className="space-y-3 pr-3">
+                <Accordion type="single" collapsible className="w-full" value={expandedOrgMembers || ""} onValueChange={setExpandedOrgMembers}>
                   {userOrganizations.map(org => (
-                    <li key={org.id} className="p-3.5 border rounded-lg shadow-sm hover:shadow-md transition-shadow bg-card">
-                      <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-2">
-                        <span className="font-semibold text-lg">{org.name}</span>
-                        <Button 
-                          variant={currentUser.defaultOrganizationId === org.id ? "default" : "outline"} 
-                          size="sm" 
-                          onClick={() => handleSetCurrentOrg(org.id)}
-                          className="w-full sm:w-auto"
-                          disabled={isLoadingOrgs}
-                        >
-                          {currentUser.defaultOrganizationId === org.id ? <Check className="mr-2 h-4 w-4"/> : null}
-                          {currentUser.defaultOrganizationId === org.id ? 'Active Context' : 'Set Active'}
-                        </Button>
-                      </div>
-                      {org.description && <p className="text-sm text-muted-foreground mt-1">{org.description}</p>}
-                      {org.ownerId === currentUser.id && org.inviteCode && (
-                        <div className="flex items-center gap-2 text-xs text-muted-foreground border-t pt-2 mt-2.5">
-                            <span>Invite Code: <strong className="text-foreground tracking-wider">{org.inviteCode}</strong></span>
-                            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleCopyInviteCode(org.inviteCode)}>
-                                {copiedCode === org.inviteCode ? <Check className="h-4 w-4 text-green-500" /> : <ClipboardCopy className="h-4 w-4" />}
-                            </Button>
+                    <AccordionItem value={org.id} key={org.id} className="mb-2 border rounded-lg shadow-sm hover:shadow-md transition-shadow bg-card overflow-hidden">
+                      <AccordionTrigger className="p-3.5 w-full text-left hover:bg-muted/50" onClick={() => setActiveOrganization(org)}>
+                        <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-2 w-full">
+                          <span className="font-semibold text-lg">{org.name}</span>
+                          <Button 
+                            variant={currentUser.defaultOrganizationId === org.id ? "default" : "outline"} 
+                            size="sm" 
+                            onClick={(e) => { e.stopPropagation(); handleSetCurrentOrg(org.id);}}
+                            className="w-full sm:w-auto"
+                            disabled={isLoadingOrgs}
+                          >
+                            {currentUser.defaultOrganizationId === org.id ? <Check className="mr-2 h-4 w-4"/> : null}
+                            {currentUser.defaultOrganizationId === org.id ? 'Active Context' : 'Set Active'}
+                          </Button>
                         </div>
-                      )}
-                    </li>
+                      </AccordionTrigger>
+                      <AccordionContent className="p-3.5 pt-0">
+                        {org.description && <p className="text-sm text-muted-foreground mt-1 mb-2">{org.description}</p>}
+                        {org.ownerId === currentUser.id && org.inviteCode && (
+                          <div className="flex items-center gap-2 text-xs text-muted-foreground border-t pt-2 mt-2.5">
+                              <span>Invite Code: <strong className="text-foreground tracking-wider">{org.inviteCode}</strong></span>
+                              <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleCopyInviteCode(org.inviteCode)}>
+                                  {copiedCode === org.inviteCode ? <Check className="h-4 w-4 text-green-500" /> : <ClipboardCopy className="h-4 w-4" />}
+                              </Button>
+                          </div>
+                        )}
+                        <Separator className="my-3" />
+                        <h4 className="text-md font-semibold mb-2">Members ({activeOrgMembers.length})</h4>
+                        {isLoadingOrgMembers && activeOrganization?.id === org.id && <Loader2 className="h-5 w-5 animate-spin my-2" />}
+                        {!isLoadingOrgMembers && activeOrganization?.id === org.id && activeOrgMembers.length === 0 && <p className="text-xs text-muted-foreground">No members found or you're the only one.</p>}
+                        {!isLoadingOrgMembers && activeOrganization?.id === org.id && activeOrgMembers.length > 0 && (
+                          <ScrollArea className="max-h-[150px] pr-2">
+                            <ul className="space-y-1.5">
+                              {activeOrgMembers.map(member => (
+                                <li key={member.id} className="flex items-center gap-2 text-sm p-1.5 rounded hover:bg-muted/30">
+                                  <Avatar className="h-7 w-7">
+                                      <AvatarImage src={member.photoURL || undefined} alt={member.displayName || 'User'} />
+                                      <AvatarFallback className="text-xs">
+                                          {member.displayName ? member.displayName.charAt(0).toUpperCase() : <UserCircle size={14}/>}
+                                      </AvatarFallback>
+                                  </Avatar>
+                                  <span className="truncate">{member.displayName || member.email}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </ScrollArea>
+                        )}
+                      </AccordionContent>
+                    </AccordionItem>
                   ))}
-                </ul>
+                </Accordion>
               </ScrollArea>
             </CardContent>
           </Card>
@@ -293,13 +359,14 @@ export function OrganizationManagementView() {
                           </div>
                           {team.description && <p className="text-sm text-muted-foreground mt-1">{team.description}</p>}
                            <p className="text-xs text-muted-foreground mt-1">Members: {team.memberIds.length}</p>
+                           {/* TODO: Add team member listing here when a team is expanded/clicked */}
                         </li>
                       );
                     })}
                   </ul>
                 </ScrollArea>
                 <Separator className="my-4" />
-                <form onSubmit={handleCreateTeam} className="space-y-3">
+                <form onSubmit={handleCreateTeamSubmit} className="space-y-3">
                     <h4 className="text-md font-semibold">Create New Team in &quot;{activeOrganization.name}&quot;</h4>
                     <div>
                         <Label htmlFor="new-team-name">Team Name</Label>
@@ -340,7 +407,7 @@ export function OrganizationManagementView() {
                 <CardDescription>Set up a new workspace for your projects and teams.</CardDescription>
             </CardHeader>
             <CardContent>
-                <form onSubmit={handleCreateOrganization} className="space-y-4">
+                <form onSubmit={handleCreateOrganizationSubmit} className="space-y-4">
                     <div>
                         <Label htmlFor="new-org-name">Organization Name</Label>
                         <Input 
@@ -377,7 +444,7 @@ export function OrganizationManagementView() {
                     <CardDescription>Enter an invite code to become a member of an organization.</CardDescription>
                 </CardHeader>
                 <CardContent>
-                    <form onSubmit={handleJoinOrganization} className="space-y-4">
+                    <form onSubmit={handleJoinOrganizationSubmit} className="space-y-4">
                         <div>
                             <Label htmlFor="join-invite-code">Invite Code</Label>
                             <Input 

@@ -85,6 +85,7 @@ const getDefaultBoardForNewUser = (): Board => ({
   organizationId: null,
   teamId: null,
   isPublic: false,
+  personalBoards: [], // Added for consistency, though this specific board is added to personalBoards later
 });
 
 const defaultUserSettings = {
@@ -134,6 +135,7 @@ interface AuthContextType {
   setCurrentOrganization: (organizationId: string | null) => Promise<void>;
   joinOrganizationByInviteCode: (inviteCode: string) => Promise<Organization | null>;
   getUsersForChat: () => Promise<AppUser[]>; 
+  getOrganizationMembers: (organizationId: string) => Promise<AppUser[]>; // New
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -191,7 +193,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     try {
       const userDocSnap = await getDoc(userDocRef);
-      const defaultBoard = getDefaultBoardForNewUser();
+      const defaultBoard = getDefaultBoardForNewUser(); // This will be a personal board
 
       if (!userDocSnap.exists()) {
         console.log(`Firestore Init: User document for ${appUser.id} does NOT exist. Attempting to CREATE new document.`);
@@ -202,7 +204,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           provider: appUser.provider,
           createdAt: serverTimestamp() as Timestamp,
           lastLogin: serverTimestamp() as Timestamp,
-          boards: [defaultBoard],
+          personalBoards: [defaultBoard], // Store personal boards in an array
           activeBoardId: defaultBoard.id,
           settings: defaultUserSettings,
           aiChatHistory: { 
@@ -225,36 +227,41 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const updates: Record<string, any> = { lastLogin: serverTimestamp() as Timestamp };
         let needsUpdate = false;
 
-        if (!userData.boards || !Array.isArray(userData.boards) || userData.boards.length === 0) {
-          updates.boards = [defaultBoard];
-          updates.activeBoardId = defaultBoard.id;
-          needsUpdate = true;
-          console.log(`Firestore Init: User ${appUser.id} - boards missing or empty. Adding default board.`);
+        // Ensure personalBoards field exists and is an array
+        if (!userData.personalBoards || !Array.isArray(userData.personalBoards)) {
+            updates.personalBoards = userData.boards && Array.isArray(userData.boards) && userData.boards.length > 0 
+                ? userData.boards.map((b: Partial<Board>) => ({ ...getDefaultBoardForNewUser(), ...b, id: b.id || generateId('board-migrated') })) // Attempt migration
+                : [defaultBoard];
+            updates.activeBoardId = updates.personalBoards[0].id;
+            needsUpdate = true;
+            console.log(`Firestore Init: User ${appUser.id} - personalBoards missing or not array. Initialized/Migrated.`);
         } else {
-          updates.boards = userData.boards.map((board: Board) => ({
-            ...board,
-            id: board.id || generateId('board-migrated'),
-            name: board.name || 'Untitled Board',
-            columns: assignTaskStatusToDefaultColumns(board.columns),
-            createdAt: board.createdAt || formatISO(new Date()),
-            theme: board.theme || {},
-            groupId: board.groupId === undefined ? null : board.groupId,
-            organizationId: board.organizationId === undefined ? null : board.organizationId,
-            teamId: board.teamId === undefined ? null : board.teamId,
-            isPublic: board.isPublic === undefined ? false : board.isPublic,
-          }));
-          if (JSON.stringify(updates.boards) !== JSON.stringify(userData.boards)) {
-             needsUpdate = true;
-             console.log(`Firestore Init: User ${appUser.id} - updated boards structure.`);
-          }
+            updates.personalBoards = userData.personalBoards.map((board: Partial<Board>) => ({
+                ...getDefaultBoardForNewUser(), // Spread defaults first
+                ...board, // Then spread actual board data
+                id: board.id || generateId('board-migrated'),
+                name: board.name || 'Untitled Board',
+                columns: assignTaskStatusToDefaultColumns(board.columns || []),
+                createdAt: board.createdAt || formatISO(new Date()),
+                theme: board.theme || {},
+                groupId: board.groupId === undefined ? null : board.groupId,
+                organizationId: board.organizationId === undefined ? null : board.organizationId, // Personal boards shouldn't have this
+                teamId: board.teamId === undefined ? null : board.teamId, // Personal boards shouldn't have this
+                isPublic: board.isPublic === undefined ? false : board.isPublic,
+              }));
+              if (JSON.stringify(updates.personalBoards) !== JSON.stringify(userData.personalBoards)) {
+                needsUpdate = true;
+                console.log(`Firestore Init: User ${appUser.id} - updated personalBoards structure.`);
+             }
         }
         
-        if ((!userData.activeBoardId && updates.boards && updates.boards.length > 0) || 
-            (userData.activeBoardId && updates.boards && !updates.boards.find((b: Board) => b.id === userData.activeBoardId) && updates.boards.length > 0)) {
-          updates.activeBoardId = updates.boards[0].id;
+        if ((!userData.activeBoardId && updates.personalBoards && updates.personalBoards.length > 0) || 
+            (userData.activeBoardId && updates.personalBoards && !updates.personalBoards.find((b: Board) => b.id === userData.activeBoardId) && updates.personalBoards.length > 0)) {
+          updates.activeBoardId = updates.personalBoards[0].id;
           needsUpdate = true;
-          console.log(`Firestore Init: User ${appUser.id} - activeBoardId was invalid or missing. Reset to first board.`);
+          console.log(`Firestore Init: User ${appUser.id} - activeBoardId was invalid or missing. Reset to first personal board.`);
         }
+
 
         if (!userData.settings) {
           updates.settings = defaultUserSettings;
@@ -271,6 +278,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             currentAiChatHistory.messages = [];
             aiHistoryNeedsUpdate = true;
           }
+          // Check if lastUpdatedAt exists and is a Firestore Timestamp, if not, reset it
           if (typeof currentAiChatHistory.lastUpdatedAt === 'undefined' || !(currentAiChatHistory.lastUpdatedAt instanceof Timestamp)) { 
             currentAiChatHistory.lastUpdatedAt = serverTimestamp();
             aiHistoryNeedsUpdate = true;
@@ -295,7 +303,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           updates.teamMemberships = [];
           needsUpdate = true;
         }
-        if (userData.defaultOrganizationId === undefined) {
+        if (userData.defaultOrganizationId === undefined) { // Check specifically for undefined
           updates.defaultOrganizationId = null;
           needsUpdate = true;
         }
@@ -310,7 +318,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (appUser.displayName && userData.displayName !== appUser.displayName) {
             updates.displayName = appUser.displayName; needsUpdate = true;
         }
-        if (appUser.photoURL !== undefined && userData.photoURL !== appUser.photoURL) {
+        if (appUser.photoURL !== undefined && userData.photoURL !== appUser.photoURL) { // Check for undefined before comparing
             updates.photoURL = appUser.photoURL || null; needsUpdate = true;
         }
         if(userData.provider !== appUser.provider) {
@@ -329,11 +337,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       console.error(`Firestore Init: CRITICAL ERROR during Firestore operation for user ${appUser.id}:`, error);
       const errorMessage = error instanceof Error ? error.message : String(error);
-      toast({
+      // Use setTimeout to ensure toast is called outside of render cycle if this function is somehow triggered during render
+      setTimeout(() => toast({
         title: 'Data Sync Error',
         description: `Could not save user data: ${errorMessage}.`,
         variant: 'destructive',
-      });
+      }), 0);
     }
   };
 
@@ -364,7 +373,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 ...baseAppUser,
                 organizationMemberships: userData.organizationMemberships || [],
                 teamMemberships: userData.teamMemberships || [],
-                defaultOrganizationId: userData.defaultOrganizationId || null,
+                defaultOrganizationId: userData.defaultOrganizationId === undefined ? null : userData.defaultOrganizationId,
                 chatRoomIds: userData.chatRoomIds || [], 
             };
         }
@@ -396,7 +405,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                     ...baseAppUser,
                     organizationMemberships: userData.organizationMemberships || [],
                     teamMemberships: userData.teamMemberships || [],
-                    defaultOrganizationId: userData.defaultOrganizationId || null,
+                    defaultOrganizationId: userData.defaultOrganizationId === undefined ? null : userData.defaultOrganizationId,
                     chatRoomIds: userData.chatRoomIds || [], 
                 };
             }
@@ -864,6 +873,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (querySnapshot.empty) {
         toast({ title: "Not Found", description: "No organization found with this invite code.", variant: "destructive" });
+        setLoading(false);
         return null;
       }
 
@@ -889,6 +899,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             setCurrentUser(prevUser => prevUser ? ({...prevUser, defaultOrganizationId: organization.id}) : null);
         }
         await batch.commit(); 
+        setLoading(false);
         return organization;
       }
 
@@ -963,6 +974,47 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const getOrganizationMembers = async (organizationId: string): Promise<AppUser[]> => {
+    if (!organizationId) return [];
+    try {
+        const orgDocRef = doc(db, "organizations", organizationId);
+        const orgDocSnap = await getDoc(orgDocRef);
+
+        if (!orgDocSnap.exists()) {
+            console.warn(`getOrganizationMembers: Organization ${organizationId} not found.`);
+            return [];
+        }
+
+        const orgData = orgDocSnap.data() as Organization;
+        const memberIds = orgData.memberIds || [];
+
+        if (memberIds.length === 0) return [];
+
+        const memberPromises = memberIds.map(id => getDoc(doc(db, "users", id)));
+        const memberDocsSnap = await Promise.all(memberPromises);
+        
+        const members: AppUser[] = memberDocsSnap
+            .filter(docSnap => docSnap.exists())
+            .map(docSnap => {
+                const data = docSnap.data();
+                return {
+                    id: docSnap.id,
+                    email: data.email,
+                    displayName: data.displayName,
+                    photoURL: data.photoURL,
+                    provider: data.provider,
+                    // Other fields might not be needed here or could be fetched if necessary
+                } as AppUser; // Cast carefully or define a specific MemberAppUser type
+            });
+        return members;
+
+    } catch (error) {
+        console.error("Error fetching organization members:", error);
+        toast({ title: "Error", description: "Could not load organization members.", variant: "destructive" });
+        return [];
+    }
+  };
+
 
   const value = {
     currentUser,
@@ -985,6 +1037,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setCurrentOrganization,
     joinOrganizationByInviteCode,
     getUsersForChat,
+    getOrganizationMembers,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
