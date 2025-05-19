@@ -24,7 +24,7 @@ import { OrganizationManagementView } from '@/components/organization-management
 import { ChatLayout } from '@/components/chat/ChatLayout';
 import { Bot, CheckSquare, ListTodo, Settings, Star, Menu, FolderKanban, PlusCircle, Edit3, Trash2, Palette, LogOut, Database, Zap, User, Chrome, FolderPlus, FolderSymlink, Folders, Users, Building, Briefcase, MessageSquare, LogIn, MoreVertical, UserPlus, Sparkles } from "lucide-react";
 import { useSidebar } from '@/components/ui/sidebar';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button'; // Added buttonVariants import
 import { cn } from '@/lib/utils';
 import { useTasks } from '@/contexts/TaskContext';
 import type { Board, BoardGroup, Organization, Team } from '@/types';
@@ -59,8 +59,9 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
+  AlertDialogTrigger
 } from "@/components/ui/alert-dialog";
-import { AlertDialogTrigger } from "@/components/ui/alert-dialog";
+
 import { Badge } from "@/components/ui/badge";
 import { useToast } from '@/hooks/use-toast';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -101,7 +102,7 @@ export default function Home() {
   const [isCreateTeamDialogOpen, setIsCreateTeamDialogOpen] = useState(false);
 
   const [userOrganizations, setUserOrganizations] = useState<Organization[]>([]);
-  const [userTeams, setUserTeams] = useState<Team[]>([]); // This will be managed within OrganizationManagementView or SettingsView
+  const [userTeams, setUserTeams] = useState<Team[]>([]); 
   const [selectedOrgForTeamCreation, setSelectedOrgForTeamCreation] = useState<string | null>(null);
 
 
@@ -130,6 +131,18 @@ export default function Home() {
   useEffect(() => {
     fetchUserOrgs();
   }, [fetchUserOrgs]);
+
+  useEffect(() => {
+    const fetchTeamsForActiveOrg = async () => {
+        if (currentUser && !isGuest && currentUser.defaultOrganizationId) {
+            const teams = await getUserTeams(currentUser.defaultOrganizationId);
+            setUserTeams(teams);
+        } else {
+            setUserTeams([]);
+        }
+    };
+    fetchTeamsForActiveOrg();
+  }, [currentUser, getUserTeams]);
 
 
   if (authLoading || (!currentUser && !isGuest && activeView !== 'chat')) {
@@ -225,15 +238,23 @@ export default function Home() {
     return null;
   }
 
-
   const handleViewChange = (newView: ActiveView) => {
     setActiveView(newView);
     if (isMobile) {
       setSidebarOpen(false);
     }
   };
-
-
+  
+  const handleJoinTeamAttempt = async (teamId: string, teamName: string) => {
+    if (!currentUser || !currentUser.defaultOrganizationId) return;
+    const success = await joinTeam(teamId);
+    if (success) {
+      toast({ title: "Joined Team", description: `You have successfully joined "${teamName}".`});
+      // Refresh teams list
+      const updatedTeams = await getUserTeams(currentUser.defaultOrganizationId);
+      setUserTeams(updatedTeams);
+    }
+  };
 
 
   return (
@@ -260,18 +281,17 @@ export default function Home() {
         </SidebarHeader>
         <SidebarContent className="flex-1 overflow-y-auto p-2">
           <SidebarMenu>
-            {!isGuest && currentUser && (
-              <SidebarMenuItem>
+            <SidebarMenuItem>
                 <SidebarMenuButton
                   tooltip="Organizations"
                   isActive={activeView === 'organization-management'}
                   onClick={() => handleViewChange('organization-management')}
                   className="w-full hover:bg-sidebar-accent/80 dark:hover:bg-sidebar-accent/50"
+                  disabled={authLoading || (!currentUser && !isGuest)}
                 >
                   <Building /> Organizations
                 </SidebarMenuButton>
               </SidebarMenuItem>
-            )}
             <SidebarSeparator />
 
             <SidebarMenuItem>
@@ -594,7 +614,7 @@ export default function Home() {
                     <DropdownMenuItem onClick={() => openCreateBoardDialog()}>
                       <PlusCircle className="mr-2 h-4 w-4" /> Create Board
                     </DropdownMenuItem>
-                     <DropdownMenuItem onClick={() => setIsThemeCustomizerOpen(true)} disabled={!activeBoardId}>
+                     <DropdownMenuItem onClick={() => {const activeBoardForTheme = getActiveBoard(); if (activeBoardForTheme) handleCustomizeTheme(activeBoardForTheme);}} disabled={!activeBoardId}>
                        <Palette className="mr-2 h-4 w-4" /> Customize Board
                     </DropdownMenuItem>
                   </DropdownMenuContent>
@@ -647,9 +667,12 @@ export default function Home() {
       />
       <CreateTeamDialog
         open={isCreateTeamDialogOpen}
-        onOpenChange={(isOpen) => {
+        onOpenChange={async (isOpen) => {
             setIsCreateTeamDialogOpen(isOpen);
-            // This might need to trigger a refresh within OrganizationManagementView if that view is active
+            if(isOpen === false && currentUser && currentUser.defaultOrganizationId) {
+                const teams = await getUserTeams(currentUser.defaultOrganizationId);
+                setUserTeams(teams);
+            }
         }}
         organizationId={selectedOrgForTeamCreation}
       />
